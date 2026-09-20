@@ -21,12 +21,16 @@ export default function NewClaim() {
   const [form, setForm] = useState(BLANK);
   const [files, setFiles] = useState([]);
   const [categories, setCategories] = useState([]);
+  // The server's ceiling depends on where it runs, so it is asked rather
+  // than assumed; a file over it is rejected here instead of failing mid-upload.
+  const [maxMb, setMaxMb] = useState(4);
   const [budget, setBudget] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.get('/master/categories').then(({ data }) => setCategories(data.categories)).catch(() => {});
+    api.get('/limits').then(({ data }) => setMaxMb(data.maxUploadMb)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -148,13 +152,34 @@ export default function NewClaim() {
 
         <fieldset>
           <legend>4 · Bill Documents</legend>
-          <Field label="Attach bill copy" hint="PDF, JPG or PNG · up to 10 files · required before submitting">
-            <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png"
-                   onChange={(e) => setFiles([...e.target.files])} />
+          <Field
+            label="Attach bill copy"
+            hint={`PDF, JPG or PNG · up to ${maxMb} MB each · required before submitting`}
+          >
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.jpg,.jpeg,.png"
+              onChange={(e) => {
+                const picked = [...e.target.files];
+                const tooBig = picked.filter((f) => f.size > maxMb * 1024 * 1024);
+                if (tooBig.length) {
+                  setError(
+                    `${tooBig.map((f) => f.name).join(', ')} — each file must be under ${maxMb} MB. ` +
+                      'Scan at a lower resolution or split the document.'
+                  );
+                  e.target.value = '';
+                  setFiles([]);
+                  return;
+                }
+                setError('');
+                setFiles(picked);
+              }}
+            />
           </Field>
           {files.length > 0 && (
             <div className="small muted">
-              {files.map((f) => f.name).join(', ')}
+              {files.map((f) => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(' · ')}
             </div>
           )}
         </fieldset>

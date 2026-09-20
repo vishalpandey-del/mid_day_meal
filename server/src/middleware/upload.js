@@ -24,8 +24,20 @@ try {
 
 const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png'];
 
-// MongoDB refuses a document over 16 MB, so the cap stays safely below it.
-const maxMb = Math.min(Number(process.env.MAX_UPLOAD_MB || 10), 15);
+/**
+ * Two ceilings apply, and the lower one wins.
+ *
+ * Vercel rejects a request body over 4.5 MB before it ever reaches the
+ * function, which surfaces in the browser as a bare network error. Holding
+ * multer below that means the user gets a real message instead. MongoDB's
+ * own 16 MB document limit is the ceiling when running elsewhere.
+ */
+const SERVERLESS_BODY_LIMIT_MB = 4;
+const configuredMb = Number(process.env.MAX_UPLOAD_MB || 10);
+export const maxUploadMb = process.env.VERCEL
+  ? Math.min(configuredMb, SERVERLESS_BODY_LIMIT_MB)
+  : Math.min(configuredMb, 15);
+const maxMb = maxUploadMb;
 
 const billFilter = (_req, file, cb) => {
   if (!ALLOWED.includes(file.mimetype)) {

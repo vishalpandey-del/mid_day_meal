@@ -105,6 +105,13 @@ moves, change `regions` to match.
 to boot and the database handshake — a few seconds. Subsequent requests are
 fast.
 
+**Upload size.** Vercel rejects a request body over 4.5 MB before it reaches
+the function, and it returns no JSON, so the browser reports a bare network
+error. The upload cap therefore drops to 4 MB when `VERCEL` is set, and
+`GET /api/limits` tells the client what it is so an oversized file is refused
+with a readable message instead. Running anywhere else keeps the 10 MB
+default.
+
 **Upload storage.** Bill documents are stored as bytes in MongoDB, because a
 serverless filesystem is wiped between invocations. This needs no extra
 service and the files are covered by the Atlas backup, but a single document
@@ -125,3 +132,4 @@ The read path already falls back to disk, so old local files keep working.
 | CORS error in the browser console | `CLIENT_URL` does not match the site's origin |
 | `404` on `/login` but `/` works | Frontend `vercel.json` rewrite is missing |
 | `401` immediately after signing in | `JWT_SECRET` changed between deployments |
+| "Network error" when creating a bill | File over 4.5 MB — Vercel drops it before the function sees it |

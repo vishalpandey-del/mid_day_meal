@@ -19,6 +19,19 @@ export const errorHandler = (err, _req, res, _next) => {
     const field = Object.keys(err.keyValue || {})[0] || 'field';
     message = `Duplicate value for ${field}: ${err.keyValue?.[field]}`;
   }
+  // Multer reports its own failures; translate them into plain guidance.
+  if (err.name === 'MulterError') {
+    statusCode = 400;
+    message =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? `That file is too large. Each document must be under ${process.env.VERCEL ? 4 : 10} MB.`
+        : err.code === 'LIMIT_FILE_COUNT'
+        ? 'Too many files in one upload.'
+        : err.code === 'LIMIT_UNEXPECTED_FILE'
+        ? `Unexpected file field "${err.field}".`
+        : `Upload failed: ${err.message}`;
+  }
+
   if (err.name === 'ValidationError') {
     statusCode = 400;
     message = 'Validation failed';

@@ -15,6 +15,7 @@ import reportRoutes from './routes/reportRoutes.js';
 import budgetRoutes from './routes/budgetRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import { notFound, errorHandler } from './middleware/errorHandler.js';
+import { maxUploadMb } from './middleware/upload.js';
 
 const app = express();
 
@@ -80,6 +81,11 @@ app.get('/', (_req, res) =>
     service: 'Vidyaposhan API',
     docs: '/api/health',
   })
+);
+
+// The client reads this so it can reject an oversized file before uploading.
+app.get('/api/limits', (_req, res) =>
+  res.json({ success: true, maxUploadMb, acceptedTypes: ['application/pdf', 'image/jpeg', 'image/png'] })
 );
 
 app.get('/api/health', (_req, res) =>
