@@ -1,5 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import Claim from '../models/Claim.js';
 import School from '../models/School.js';
 import BillCategory from '../models/BillCategory.js';
@@ -26,18 +24,8 @@ import {
   ROLES,
 } from '../config/constants.js';
 import { inr } from '../utils/format.js';
-import { uploadDir } from '../middleware/upload.js';
+import { persistFiles, readFile, removeFiles } from '../middleware/upload.js';
 
-const attachmentsFrom = (files = [], kind = 'bill') =>
-  files.map((f) => ({
-    originalName: f.originalname,
-    storedName: f.filename,
-    path: f.filename,
-    mimeType: f.mimetype,
-    sizeBytes: f.size,
-    kind,
-    uploadedAt: new Date(),
-  }));
 
 /* ------------------------------------------------------------------ *
  * Read
@@ -164,7 +152,7 @@ export const createClaim = asyncHandler(async (req, res) => {
     block: school.blockRef,
     dcOffice: school.dcOffice,
     submittedBy: user._id,
-    attachments: attachmentsFrom(req.files),
+    attachments: await persistFiles(req.files, { user }),
     status: isDraft ? CLAIM_STATUS.DRAFT : CLAIM_STATUS.PENDING_CHECKER,
     submittedAt: null,
   });
@@ -226,7 +214,11 @@ export const updateClaim = asyncHandler(async (req, res) => {
   }
   Object.assign(claim, rest);
 
-  if (req.files?.length) claim.attachments.push(...attachmentsFrom(req.files));
+  if (req.files?.length) {
+    claim.attachments.push(
+      ...(await persistFiles(req.files, { user: req.user, claimId: claim._id }))
+    );
+  }
 
   claim.pushHistory('Claim Updated', req.user);
   await claim.save();
@@ -288,9 +280,7 @@ export const deleteClaim = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Only drafts can be deleted. Submitted claims are permanent records.');
   }
 
-  for (const a of claim.attachments) {
-    fs.promises.unlink(path.join(uploadDir, path.basename(a.storedName))).catch(() => {});
-  }
+  await removeFiles(claim.attachments.map((a) => a.storedName));
   await claim.deleteOne();
 
   res.json({ success: true, message: `Draft ${claim.claimId} deleted.` });
@@ -642,7 +632,13 @@ export const respondToQuery = asyncHandler(async (req, res) => {
   claim.status = CLAIM_STATUS.RESUBMITTED;
 
   if (req.files?.length) {
-    claim.attachments.push(...attachmentsFrom(req.files, 'query_response'));
+    claim.attachments.push(
+      ...(await persistFiles(req.files, {
+        kind: 'query_response',
+        user: req.user,
+        claimId: claim._id,
+      }))
+    );
   }
 
   claim.pushHistory(AUDIT_ACTIONS.QUERY_RESPONDED, req.user, req.body.response);
@@ -851,7 +847,13 @@ export const addAttachments = asyncHandler(async (req, res) => {
     throw ApiError.badRequest(`Documents cannot be added to a "${claim.status}" claim.`);
   }
 
-  claim.attachments.push(...attachmentsFrom(req.files, req.body.kind || 'supporting'));
+  claim.attachments.push(
+    ...(await persistFiles(req.files, {
+      kind: req.body.kind || 'supporting',
+      user: req.user,
+      claimId: claim._id,
+    }))
+  );
   claim.pushHistory(AUDIT_ACTIONS.FILE_UPLOADED, req.user, `${req.files.length} file(s)`);
   await claim.save();
 
@@ -871,14 +873,15 @@ export const downloadAttachment = asyncHandler(async (req, res) => {
   if (!claim) throw ApiError.notFound('Claim not found.');
   assertCanView(claim, req.user);
 
+  // Resolve through the claim record only — never trust the path param.
   const att = claim.attachments.find((a) => a.storedName === req.params.storedName);
   if (!att) throw ApiError.notFound('Attachment not found on this claim.');
 
-  // Resolve through the claim record only — never trust the path param directly.
-  const abs = path.join(uploadDir, path.basename(att.storedName));
-  if (!fs.existsSync(abs)) throw ApiError.notFound('File is missing from storage.');
+  const file = await readFile(att.storedName);
+  if (!file) throw ApiError.notFound('File is missing from storage.');
 
-  res.setHeader('Content-Type', att.mimeType || 'application/octet-stream');
+  res.setHeader('Content-Type', file.mimeType || att.mimeType || 'application/octet-stream');
   res.setHeader('Content-Disposition', `inline; filename="${att.originalName}"`);
-  fs.createReadStream(abs).pipe(res);
+  res.setHeader('Content-Length', file.buffer.length);
+  res.send(file.buffer);
 });

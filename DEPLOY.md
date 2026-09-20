@@ -97,14 +97,17 @@ such as `/login` is handled by the router instead of returning 404.
 
 ## Known limits
 
-**Uploads do not persist.** A serverless filesystem is read-only apart from
-`/tmp`, and `/tmp` is wiped between invocations. Bill documents will upload and
-then disappear. For production, move `middleware/upload.js` to object storage
-(S3, Cloudinary or Vercel Blob) and store the returned URL on the claim.
-
 **Cold starts.** The first request after a quiet period waits for the function
 to boot and the database handshake — a few seconds. Subsequent requests are
 fast.
+
+**Upload storage.** Bill documents are stored as bytes in MongoDB, because a
+serverless filesystem is wiped between invocations. This needs no extra
+service and the files are covered by the Atlas backup, but a single document
+cannot exceed 16 MB and the free tier holds 512 MB in total. At a few hundred
+bills that is comfortable; past that, move `middleware/upload.js` to object
+storage (S3, Cloudinary or Vercel Blob) and keep only the URL on the claim.
+The read path already falls back to disk, so old local files keep working.
 
 ---
 
