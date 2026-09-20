@@ -27,15 +27,26 @@ app.use(
   })
 );
 
-const allowed = (process.env.CLIENT_URL || 'http://localhost:5173')
+/**
+ * CLIENT_URL may hold several comma-separated origins, which is how the
+ * deployed site and local development coexist.
+ */
+const allowed = (process.env.CLIENT_URL || 'http://localhost:5173,http://localhost:5174')
   .split(',')
-  .map((o) => o.trim());
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean);
+
+/** Vercel gives every deployment its own hostname, so previews are matched. */
+const isVercelPreview = (origin) =>
+  /^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin);
 
 app.use(
   cors({
     origin: (origin, cb) => {
-      // Same-origin and tools like curl send no Origin header.
-      if (!origin || allowed.includes(origin)) return cb(null, true);
+      // Same-origin requests and tools like curl send no Origin header.
+      if (!origin) return cb(null, true);
+      const clean = origin.replace(/\/$/, '');
+      if (allowed.includes(clean) || isVercelPreview(clean)) return cb(null, true);
       cb(new Error(`Origin ${origin} is not allowed by CORS.`));
     },
     credentials: true,
@@ -60,6 +71,14 @@ app.use(
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, message: 'Too many requests. Please slow down.' },
+  })
+);
+
+app.get('/', (_req, res) =>
+  res.json({
+    success: true,
+    service: 'Vidyaposhan API',
+    docs: '/api/health',
   })
 );
 

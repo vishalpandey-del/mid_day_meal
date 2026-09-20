@@ -4,8 +4,23 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import ApiError from '../utils/ApiError.js';
 
-const uploadDir = path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
-fs.mkdirSync(uploadDir, { recursive: true });
+/**
+ * Serverless platforms give a read-only filesystem apart from /tmp, so the
+ * upload directory follows the environment: a real folder locally, /tmp when
+ * running on Vercel. Files written to /tmp do not survive between invocations,
+ * so object storage is the next step for production uploads.
+ */
+const onServerless = Boolean(process.env.VERCEL);
+const uploadDir = onServerless
+  ? path.join('/tmp', 'uploads')
+  : path.resolve(process.cwd(), process.env.UPLOAD_DIR || 'uploads');
+
+try {
+  fs.mkdirSync(uploadDir, { recursive: true });
+} catch (err) {
+  // A read-only root should not stop the API from booting; only uploads fail.
+  console.warn(`[upload] could not create ${uploadDir}: ${err.message}`);
+}
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),

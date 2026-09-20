@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api, { errorText } from '../api/client.js';
+import api, { errorText, fileUrl } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Alert, Badge, Card, Spinner } from '../components/UI.jsx';
 import { dateOf, dateTimeOf, inr, inrFull, ROLE_LABEL } from '../utils/format.js';
@@ -141,7 +141,7 @@ export default function ClaimDetail() {
           <Card title={`Documents (${claim.attachments?.length || 0})`}>
             {claim.attachments?.length ? claim.attachments.map((a) => (
               <Row key={a.storedName} label={a.kind === 'query_response' ? 'Query reply' : a.kind}>
-                <a href={`/api/claims/${claim._id}/attachments/${a.storedName}`}
+                <a href={fileUrl(`/claims/${claim._id}/attachments/${a.storedName}`)}
                    target="_blank" rel="noreferrer">{a.originalName}</a>
                 <span className="small muted"> · {Math.round((a.sizeBytes || 0) / 1024)} KB</span>
               </Row>

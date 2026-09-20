@@ -1,6 +1,12 @@
 import axios from 'axios';
 
-const api = axios.create({ baseURL: '/api' });
+/**
+ * In development Vite proxies /api to the local server, so a relative base
+ * works. A deployed build talks to a different origin, so VITE_API_URL points
+ * at the API and is baked in at build time.
+ */
+const API_ROOT = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const api = axios.create({ baseURL: API_ROOT ? `${API_ROOT}/api` : '/api' });
 
 // Every request carries the saved token.
 api.interceptors.request.use((config) => {
@@ -29,6 +35,9 @@ export const errorText = (err) => {
   if (d.details?.length) return d.details.map((x) => x.message).join(' · ');
   return d.message || 'Request failed.';
 };
+
+/** Absolute URL for a file served by the API, e.g. a bill attachment. */
+export const fileUrl = (path) => (API_ROOT ? `${API_ROOT}/api${path}` : `/api${path}`);
 
 /** Triggers a browser download for an .xlsx endpoint. */
 export const downloadFile = async (url, params) => {
