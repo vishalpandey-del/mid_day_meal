@@ -63,7 +63,6 @@ export default function ClaimDetail() {
   const canMakerSubmit = role === 'school_maker' && ['Draft', 'Returned'].includes(s);
   const canMakerRespond = role === 'school_maker' && s === 'Under Query';
   const canChecker = role === 'school_checker' && s === 'Pending Checker Review';
-  const canBlock = role === 'block' && s === 'Pending Block Review';
   const canDc = role === 'dc' && ['Submitted', 'Resubmitted', 'Under Query'].includes(s);
   const canPay = role === 'dc' && s === 'Approved';
   const canRevise = role === 'dc' && claim.lastExportedAt;
@@ -169,22 +168,18 @@ export default function ClaimDetail() {
             {!action ? (
               <div className="row">
                 {canMakerEdit && (
-                  <button className="btn" onClick={() => navigate(`/claims/new?edit=${claim._id}`)}>Edit</button>
+                  <button className="btn" onClick={() => navigate(`/claims/new?edit=${claim._id}`)}>
+                    {s === 'Returned' ? 'Correct & Send Back' : 'Edit'}
+                  </button>
                 )}
                 {canMakerSubmit && (
                   <button className="btn primary" disabled={busy}
                           onClick={() => run(act.submit, 'Sent for checker review.')}>
-                    Submit for Review
+                    {s === 'Returned' ? 'Send Back As Is' : 'Submit for Review'}
                   </button>
                 )}
                 {canMakerRespond && <button className="btn primary" onClick={() => setAction('respond')}>Respond to Query</button>}
                 {canChecker && (
-                  <>
-                    <button className="btn green" onClick={() => setAction('forward')}>Forward to Block</button>
-                    <button className="btn red" onClick={() => setAction('return')}>Return to Maker</button>
-                  </>
-                )}
-                {canBlock && (
                   <>
                     <button className="btn green" onClick={() => setAction('forward')}>Forward to DC</button>
                     <button className="btn red" onClick={() => setAction('return')}>Return to Maker</button>
@@ -214,7 +209,7 @@ export default function ClaimDetail() {
                 {canRevise && <button className="btn red" onClick={() => setAction('revise')}>Revise Status</button>}
 
                 {!canMakerEdit && !canMakerSubmit && !canMakerRespond && !canChecker &&
-                 !canBlock && !canDc && !canPay && !canRevise && (
+                 !canDc && !canPay && !canRevise && (
                   <div className="muted small">
                     No action is available to you for a bill in “{s}”.
                   </div>

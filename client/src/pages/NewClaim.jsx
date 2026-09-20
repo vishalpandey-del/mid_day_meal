@@ -28,6 +28,10 @@ export default function NewClaim() {
   // together even though each one passes. The total is checked as well.
   const [maxTotalMb, setMaxTotalMb] = useState(4);
   const [budget, setBudget] = useState(null);
+  // A returned bill is corrected and sent back in one step, so the form needs
+  // to know it is looking at one.
+  const [claimStatus, setClaimStatus] = useState('');
+  const [returnReason, setReturnReason] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -43,6 +47,8 @@ export default function NewClaim() {
     if (!editId) return;
     api.get(`/claims/${editId}`).then(({ data }) => {
       const c = data.claim;
+      setClaimStatus(c.status || '');
+      setReturnReason(c.returnReason || '');
       setForm({
         vendorName: c.vendorName || '', vendorBankAccount: c.vendorBankAccount || '',
         vendorIfsc: c.vendorIfsc || '', vendorBankName: c.vendorBankName || '',
@@ -58,13 +64,17 @@ export default function NewClaim() {
 
   const chosen = categories.find((c) => c.name === form.category);
 
-  const send = async (asDraft) => {
+  /* Editing something the maker still holds: saving can also send it on. */
+  const sendable = Boolean(editId) && ['Returned', 'Draft'].includes(claimStatus);
+
+  const send = async (mode) => {
     setError('');
     setBusy(true);
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => fd.append(k, v));
-      if (asDraft) fd.append('saveAsDraft', 'true');
+      if (mode === 'draft') fd.append('saveAsDraft', 'true');
+      if (mode === 'review') fd.append('sendForReview', 'true');
       files.forEach((f) => fd.append('documents', f));
 
       const { data } = editId
@@ -95,8 +105,16 @@ export default function NewClaim() {
 
       <Alert kind="error">{error}</Alert>
       {budget && <Alert kind="warn">{budget.message} — the bill was still saved.</Alert>}
+      {claimStatus === 'Returned' && returnReason && (
+        <Alert kind="warn">
+          Sent back by the checker: {returnReason} — correct it below and send it back.
+        </Alert>
+      )}
 
-      <form onSubmit={(e) => { e.preventDefault(); send(false); }} style={{ maxWidth: 820 }}>
+      <form
+        onSubmit={(e) => { e.preventDefault(); send(sendable ? 'review' : 'save'); }}
+        style={{ maxWidth: 820 }}
+      >
         <fieldset>
           <legend>1 · Vendor &amp; Payment Details</legend>
           <div className="grid2">
@@ -203,10 +221,21 @@ export default function NewClaim() {
 
         <div className="row">
           <button type="submit" className="btn primary" disabled={busy}>
-            {busy ? 'Saving…' : editId ? 'Save Changes' : 'Submit for Review'}
+            {busy
+              ? 'Saving…'
+              : !editId
+                ? 'Submit for Review'
+                : sendable
+                  ? 'Save & Send for Review'
+                  : 'Save Changes'}
           </button>
+          {editId && sendable && (
+            <button type="button" className="btn" disabled={busy} onClick={() => send('save')}>
+              Save Without Sending
+            </button>
+          )}
           {!editId && (
-            <button type="button" className="btn" disabled={busy} onClick={() => send(true)}>
+            <button type="button" className="btn" disabled={busy} onClick={() => send('draft')}>
               Save as Draft
             </button>
           )}

@@ -60,7 +60,17 @@ export const claimSchema = z.object({
     .transform((v) => v === true || v === 'true'),
 });
 
-export const claimUpdateSchema = claimSchema.partial();
+/**
+ * An edit may also send the bill on. A returned claim is corrected and
+ * resubmitted in one step, so the form carries the intent with the changes
+ * rather than leaving a saved-but-unsent bill behind.
+ */
+export const claimUpdateSchema = claimSchema.partial().extend({
+  sendForReview: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .optional()
+    .transform((v) => v === true || v === 'true'),
+});
 
 export const remarksSchema = z.object({
   remarks: z.string().trim().default(''),

@@ -19,7 +19,8 @@ const NAV = [
     { to: '/network', label: 'My School', roles: ['school_maker', 'school_checker'] },
   ]},
   { group: 'Bills', items: [
-    { to: '/claims', label: 'All Claims', roles: '*' },
+    // `end` so that /claims/new does not light this up as well.
+    { to: '/claims', label: 'All Claims', roles: '*', end: true },
     { to: '/claims/new', label: 'New Bill', roles: ['school_maker'] },
     { to: '/payments', label: 'Payments', roles: ['dc'] },
   ]},

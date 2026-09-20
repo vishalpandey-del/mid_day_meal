@@ -217,7 +217,7 @@ export const updateClaim = asyncHandler(async (req, res) => {
     );
   }
 
-  const { category, ...rest } = req.body;
+  const { category, sendForReview, saveAsDraft, ...rest } = req.body;
   if (category && category !== claim.category) {
     const cat = await BillCategory.findOne({ name: category, isActive: true });
     if (!cat) throw ApiError.badRequest(`Unknown bill category: ${category}`);
@@ -233,17 +233,32 @@ export const updateClaim = asyncHandler(async (req, res) => {
   }
 
   claim.pushHistory('Claim Updated', req.user);
+
+  /*
+   * A returned bill is corrected and sent back in one step. Doing both here
+   * means one save: the edit cannot be kept while the claim silently stays
+   * in the maker's hands, which is how a corrected bill goes unnoticed.
+   */
+  const alsoSend = sendForReview === true || sendForReview === 'true';
+  const { resubmit } = alsoSend ? await sendToChecker(claim, req) : {};
+
   await claim.save();
+  if (alsoSend) {
+    await claim.populate('school', 'name');
+    await announceToChecker(claim, req, resubmit);
+  }
 
   res.json({ success: true, claim });
 });
 
-/** POST /api/claims/:id/submit — maker sends a Draft/Returned claim to the checker. */
-export const submitClaim = asyncHandler(async (req, res) => {
-  const claim = await Claim.findById(req.params.id).populate('school', 'name');
-  if (!claim) throw ApiError.notFound('Claim not found.');
-  assertCanView(claim, req.user);
-
+/**
+ * Moves a Draft or Returned claim into the checker's queue.
+ *
+ * Shared by the submit endpoint and by an edit that asks to send the bill on
+ * in the same step, so the history entry, the audit line and the checker's
+ * notification read the same either way. The caller saves; this does not.
+ */
+const sendToChecker = async (claim, req) => {
   const submittable = [CLAIM_STATUS.DRAFT, CLAIM_STATUS.RETURNED];
   if (!submittable.includes(claim.status)) {
     throw ApiError.badRequest(`This claim is "${claim.status}" and cannot be submitted.`);
@@ -260,8 +275,11 @@ export const submitClaim = asyncHandler(async (req, res) => {
     req.user,
     `Sent for checker review · ${inr(claim.amount)}`
   );
-  await claim.save();
+  return { resubmit };
+};
 
+/** The audit line and the checker's alert, once the claim is safely saved. */
+const announceToChecker = async (claim, req, resubmit) => {
   await logAudit({
     req,
     action: resubmit ? AUDIT_ACTIONS.CLAIM_RESUBMITTED : AUDIT_ACTIONS.CLAIM_SUBMITTED,
@@ -278,6 +296,17 @@ export const submitClaim = asyncHandler(async (req, res) => {
     body: `${claim.school?.name} sent a claim for ${inr(claim.amount)}.`,
     claim,
   });
+};
+
+/** POST /api/claims/:id/submit — maker sends a Draft/Returned claim to the checker. */
+export const submitClaim = asyncHandler(async (req, res) => {
+  const claim = await Claim.findById(req.params.id).populate('school', 'name');
+  if (!claim) throw ApiError.notFound('Claim not found.');
+  assertCanView(claim, req.user);
+
+  const { resubmit } = await sendToChecker(claim, req);
+  await claim.save();
+  await announceToChecker(claim, req, resubmit);
 
   res.json({ success: true, claim });
 });
