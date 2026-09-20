@@ -62,7 +62,19 @@ export const listClaims = asyncHandler(async (req, res) => {
   }
   if (q) {
     const rx = safeRegex(q);
-    filter.$or = [{ claimId: rx }, { vendorName: rx }, { billNumber: rx }];
+    // The school's name lives on another collection, so it is resolved to ids
+    // first — that way one box finds a claim by its number, its vendor or the
+    // school that raised it.
+    const schools = await School.find({ $or: [{ name: rx }, { code: rx }] })
+      .select('_id')
+      .limit(200)
+      .lean();
+    filter.$or = [
+      { claimId: rx },
+      { vendorName: rx },
+      { billNumber: rx },
+      ...(schools.length ? [{ school: { $in: schools.map((x) => x._id) } }] : []),
+    ];
   }
 
   const perPage = Math.min(Number(limit) || 20, 100);
@@ -304,31 +316,22 @@ export const forwardClaim = asyncHandler(async (req, res) => {
   let notifyTargets;
   let title;
 
-  if (req.user.role === ROLES.SCHOOL_CHECKER) {
-    if (claim.status !== CLAIM_STATUS.PENDING_CHECKER) {
-      throw ApiError.badRequest(`This claim is "${claim.status}" and is not awaiting checker review.`);
-    }
-    claim.status = CLAIM_STATUS.PENDING_BLOCK;
-    claim.checkerRemarks = remarks;
-    claim.checkedBy = req.user._id;
-    claim.checkedAt = now;
-    notifyTargets = await recipientsForBlock(claim.block);
-    title = `Claim ${claim.claimId} awaiting block review`;
-  } else if (req.user.role === ROLES.BLOCK) {
-    if (claim.status !== CLAIM_STATUS.PENDING_BLOCK) {
-      throw ApiError.badRequest(`This claim is "${claim.status}" and is not awaiting block review.`);
-    }
-    claim.status = CLAIM_STATUS.SUBMITTED;
-    claim.blockRemarks = remarks;
-    claim.blockReviewedBy = req.user._id;
-    claim.blockReviewedAt = now;
-    // The SLA clock starts when the claim reaches the DC.
-    claim.submittedAt = now;
-    notifyTargets = await recipientsForDc(claim.dcOffice);
-    title = `Claim ${claim.claimId} forwarded to your office`;
-  } else {
-    throw ApiError.forbidden('Only a school checker or block officer can forward a claim.');
+  if (req.user.role !== ROLES.SCHOOL_CHECKER) {
+    throw ApiError.forbidden('Only a school checker can forward a claim.');
   }
+  if (claim.status !== CLAIM_STATUS.PENDING_CHECKER) {
+    throw ApiError.badRequest(`This claim is "${claim.status}" and is not awaiting checker review.`);
+  }
+
+  // The checker hands the claim straight to the DC; the block only watches.
+  claim.status = CLAIM_STATUS.SUBMITTED;
+  claim.checkerRemarks = remarks;
+  claim.checkedBy = req.user._id;
+  claim.checkedAt = now;
+  // The SLA clock starts when the claim reaches the DC.
+  claim.submittedAt = now;
+  notifyTargets = await recipientsForDc(claim.dcOffice);
+  title = `Claim ${claim.claimId} forwarded to your office`;
 
   claim.pushHistory(AUDIT_ACTIONS.CLAIM_FORWARDED, req.user, remarks);
   await claim.save();
@@ -360,28 +363,19 @@ export const returnClaim = asyncHandler(async (req, res) => {
   if (!claim) throw ApiError.notFound('Claim not found.');
   assertCanView(claim, req.user);
 
-  const stageFor = {
-    [ROLES.SCHOOL_CHECKER]: CLAIM_STATUS.PENDING_CHECKER,
-    [ROLES.BLOCK]: CLAIM_STATUS.PENDING_BLOCK,
-  };
-  const expected = stageFor[req.user.role];
-  if (!expected) throw ApiError.forbidden('Only a school checker or block officer can return a claim.');
-  if (claim.status !== expected) {
+  if (req.user.role !== ROLES.SCHOOL_CHECKER) {
+    throw ApiError.forbidden('Only a school checker can return a claim.');
+  }
+  if (claim.status !== CLAIM_STATUS.PENDING_CHECKER) {
     throw ApiError.badRequest(`This claim is "${claim.status}" and is not awaiting your review.`);
   }
 
   const remarks = req.body.remarks;
   claim.status = CLAIM_STATUS.RETURNED;
   claim.returnReason = remarks;
-  if (req.user.role === ROLES.SCHOOL_CHECKER) {
-    claim.checkerRemarks = remarks;
-    claim.checkedBy = req.user._id;
-    claim.checkedAt = new Date();
-  } else {
-    claim.blockRemarks = remarks;
-    claim.blockReviewedBy = req.user._id;
-    claim.blockReviewedAt = new Date();
-  }
+  claim.checkerRemarks = remarks;
+  claim.checkedBy = req.user._id;
+  claim.checkedAt = new Date();
 
   claim.pushHistory(AUDIT_ACTIONS.CLAIM_RETURNED, req.user, remarks);
   await claim.save();

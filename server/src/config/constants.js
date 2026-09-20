@@ -37,11 +37,16 @@ export const DC_ACTIONABLE = [
   CLAIM_STATUS.UNDER_QUERY,
 ];
 
-/** The review chain, in order. Each stage forwards to the next. */
+/**
+ * The review chain, in order. The checker hands the claim straight to the DC.
+ *
+ * The block office is not a stage here: it watches everything under it and
+ * carries no action, so nothing waits on it. PENDING_BLOCK survives as a
+ * status only because claims raised under the old chain still carry it.
+ */
 export const REVIEW_CHAIN = [
   { role: ROLES.SCHOOL_MAKER, queue: CLAIM_STATUS.DRAFT, forwardsTo: CLAIM_STATUS.PENDING_CHECKER },
-  { role: ROLES.SCHOOL_CHECKER, queue: CLAIM_STATUS.PENDING_CHECKER, forwardsTo: CLAIM_STATUS.PENDING_BLOCK },
-  { role: ROLES.BLOCK, queue: CLAIM_STATUS.PENDING_BLOCK, forwardsTo: CLAIM_STATUS.SUBMITTED },
+  { role: ROLES.SCHOOL_CHECKER, queue: CLAIM_STATUS.PENDING_CHECKER, forwardsTo: CLAIM_STATUS.SUBMITTED },
 ];
 
 /** Payment tracking — DC-only, and only meaningful once approved. */

@@ -42,7 +42,8 @@ router.use(protect);
 /* The size guard runs first so an oversized batch is answered, not dropped. */
 const files = [enforceTotalUploadSize, uploadBill.array('documents', 10)];
 const maker = authorize(ROLES.SCHOOL_MAKER);
-const reviewer = authorize(ROLES.SCHOOL_CHECKER, ROLES.BLOCK);
+/* The block office reviews nothing — it only watches what sits under it. */
+const reviewer = authorize(ROLES.SCHOOL_CHECKER);
 const dc = authorize(ROLES.DC);
 
 /* Bulk action sits above /:id so "bulk-approve" is not read as an id. */

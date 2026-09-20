@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import api, { errorText } from '../../api/client.js';
-import { Alert, Badge, Card, Empty, Field, PageHead, Spinner, Tile } from '../../components/UI.jsx';
+import { Alert, Badge, Card, Empty, Field, PageHead, SearchBox, Spinner, Tile } from '../../components/UI.jsx';
 import { ROLE_LABEL } from '../../utils/format.js';
 
 /**
@@ -8,6 +8,7 @@ import { ROLE_LABEL } from '../../utils/format.js';
  * first, the admin ticks what to create, and the passwords come back once.
  */
 export default function LoginManager() {
+  const [q, setQ] = useState('');
   const [plan, setPlan] = useState(null);
   const [picked, setPicked] = useState(new Set());
   const [created, setCreated] = useState(null);
@@ -113,6 +114,13 @@ export default function LoginManager() {
 
   const s = plan.summary;
 
+  /* The plan is already in hand, so the search narrows it here. */
+  const needle = q.trim().toLowerCase();
+  const visible = !needle ? plan.toCreate : plan.toCreate.filter((c) =>
+    [c.userId, c.name, c.role, c.scope].some((v) => String(v || '').toLowerCase().includes(needle)));
+  const visibleIds = new Set(visible.map((c) => c.userId));
+  const allVisiblePicked = visible.length > 0 && visible.every((c) => picked.has(c.userId));
+
   return (
     <>
       <PageHead
@@ -150,15 +158,21 @@ export default function LoginManager() {
             </div>
           </Card>
 
+          <Card>
+            <SearchBox value={q} onSearch={setQ} placeholder="Search user ID, name, role or place…" />
+          </Card>
+
           <Card
-            title={`Selected ${picked.size} of ${plan.toCreate.length}`}
+            title={`Selected ${picked.size} of ${plan.toCreate.length}`
+              + (needle && visible.length !== plan.toCreate.length ? ` · showing ${visible.length}` : '')}
             actions={
               <div className="row">
+                {/* Select all means the rows on screen, not the ones a search hid. */}
                 <button className="btn sm" onClick={() =>
-                  setPicked(picked.size === plan.toCreate.length
-                    ? new Set()
-                    : new Set(plan.toCreate.map((c) => c.userId)))}>
-                  {picked.size === plan.toCreate.length ? 'Clear all' : 'Select all'}
+                  setPicked(allVisiblePicked
+                    ? new Set([...picked].filter((id) => !visibleIds.has(id)))
+                    : new Set([...picked, ...visibleIds]))}>
+                  {allVisiblePicked ? 'Clear all' : 'Select all'}
                 </button>
                 <button className="btn primary sm" disabled={busy || !picked.size} onClick={commit}>
                   {busy ? 'Creating…' : `Create ${picked.size} login(s)`}
@@ -173,7 +187,7 @@ export default function LoginManager() {
                   <tr><th style={{ width: 34 }}></th><th>User ID</th><th>Name</th><th>Role</th><th>Assigned To</th></tr>
                 </thead>
                 <tbody>
-                  {plan.toCreate.map((c) => (
+                  {visible.map((c) => (
                     <tr key={c.userId}>
                       <td>
                         <input type="checkbox" checked={picked.has(c.userId)}

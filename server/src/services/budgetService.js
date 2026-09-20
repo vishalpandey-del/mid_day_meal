@@ -4,7 +4,19 @@ import Claim from '../models/Claim.js';
 import Config from '../models/Config.js';
 import { CLAIM_STATUS } from '../config/constants.js';
 
-/** Claims that have consumed budget: approved, or still moving toward approval. */
+/**
+ * Claims that have consumed budget: approved, or still moving toward it.
+ *
+ * Money is held from the moment a bill is raised rather than at approval, so
+ * two schools cannot both spend the same rupee while their claims queue. A
+ * claim that leaves the chain — Draft, Returned, Rejected — releases it.
+ *
+ * A reversed payment stays counted: the money bounced back from the bank but
+ * the bill is still owed and will be paid again, so its allocation must not
+ * be handed to something else in the meantime.
+ *
+ * PENDING_BLOCK is kept for claims raised before the block stage was removed.
+ */
 const CONSUMING_STATUSES = [
   CLAIM_STATUS.PENDING_CHECKER,
   CLAIM_STATUS.PENDING_BLOCK,

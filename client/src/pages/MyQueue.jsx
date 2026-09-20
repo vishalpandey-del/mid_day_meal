@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api, { errorText } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
-import { Alert, Badge, Card, Confirm, Empty, Spinner } from '../components/UI.jsx';
+import { Alert, Badge, Card, Confirm, Empty, SearchBox, Spinner } from '../components/UI.jsx';
 import { dateOf, inr } from '../utils/format.js';
 
 /**
@@ -10,6 +10,7 @@ import { dateOf, inr } from '../utils/format.js';
  * bulk-approval screen: tick several bills and clear them in one go.
  */
 export default function MyQueue() {
+  const [q, setQ] = useState('');
   const { user } = useAuth();
   const navigate = useNavigate();
   const isDc = user?.role === 'dc';
@@ -37,13 +38,22 @@ export default function MyQueue() {
     return next;
   });
 
-  const allPicked = claims?.length > 0 && picked.size === claims.length;
-  const toggleAll = () =>
-    setPicked(allPicked ? new Set() : new Set(claims.map((c) => c._id)));
-
-  const pickedTotal = (claims || [])
-    .filter((c) => picked.has(c._id))
-    .reduce((s, c) => s + c.amount, 0);
+  /* Narrowing the search drops anything selected that is no longer visible,
+     so Approve Selected can never act on a row that is off screen. */
+  useEffect(() => {
+    const n = q.trim().toLowerCase();
+    setPicked((prev) => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(
+        (claims || [])
+          .filter((c) => !n || [c.claimId, c.vendorName, c.billNumber, c.school?.name, c.category]
+            .some((v) => String(v || '').toLowerCase().includes(n)))
+          .map((c) => c._id)
+      );
+      const kept = [...prev].filter((id) => visible.has(id));
+      return kept.length === prev.size ? prev : new Set(kept);
+    });
+  }, [q, claims]);
 
   const bulkApprove = async () => {
     setBusy(true);
@@ -71,13 +81,43 @@ export default function MyQueue() {
   if (error && !claims) return <Alert kind="error">{error}</Alert>;
   if (!claims) return <Spinner />;
 
+  /*
+   * The queue is one page of work, already in hand, so it filters here
+   * rather than going back to the server for every keystroke.
+   */
+  const needle = q.trim().toLowerCase();
+  const shown = needle
+    ? claims.filter((c) => [c.claimId, c.vendorName, c.billNumber, c.school?.name, c.category]
+        .some((v) => String(v || '').toLowerCase().includes(needle)))
+    : claims;
+
+  /*
+   * Selection follows what is on screen. "Select all" while a search is on
+   * must mean the rows being looked at — approving something filtered out of
+   * sight is exactly the mistake this screen cannot afford.
+   */
+  const shownIds = shown.map((c) => c._id);
+  const allPicked = shown.length > 0 && shownIds.every((id) => picked.has(id));
+  const toggleAll = () => setPicked(allPicked ? new Set() : new Set(shownIds));
+  const pickedTotal = shown
+    .filter((c) => picked.has(c._id))
+    .reduce((s, c) => s + c.amount, 0);
+
   return (
     <>
       <Alert kind="error">{error}</Alert>
       <Alert kind="ok">{note}</Alert>
 
+      <Card>
+        <SearchBox
+          value={q}
+          onSearch={setQ}
+          placeholder="Search bill number, vendor, school or scheme…"
+        />
+      </Card>
+
       <Card
-        title={`My Queue · ${claims.length} claim(s)`}
+        title={`My Queue · ${shown.length} claim(s)${needle && shown.length !== claims.length ? ` of ${claims.length}` : ''}`}
         actions={
           isDc && picked.size > 0 ? (
             <div className="row">
@@ -90,8 +130,8 @@ export default function MyQueue() {
         }
         padded={false}
       >
-        {claims.length === 0 ? (
-          <Empty>Nothing is waiting for you right now.</Empty>
+        {shown.length === 0 ? (
+          <Empty>{needle ? 'No claim in your queue matches that.' : 'Nothing is waiting for you right now.'}</Empty>
         ) : (
           <div className="table-wrap">
             <table>
@@ -114,7 +154,7 @@ export default function MyQueue() {
                 </tr>
               </thead>
               <tbody>
-                {claims.map((c) => (
+                {shown.map((c) => (
                   <tr key={c._id}>
                     {isDc && (
                       <td>

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import api, { downloadFile, errorText } from '../../api/client.js';
-import { Alert, Badge, Card, Empty, PageHead, Spinner } from '../../components/UI.jsx';
+import { Alert, Badge, Card, Empty, PageHead, SearchBox, Spinner } from '../../components/UI.jsx';
 import { dateTimeOf, ROLE_LABEL } from '../../utils/format.js';
+import useDebounced from '../../utils/useDebounced.js';
 
 const TONE = {
   'Claim Approved': 'green', 'Claim Rejected': 'red', 'Claim Returned': 'red',
@@ -14,14 +15,18 @@ export default function AuditTrail() {
   const [res, setRes] = useState(null);
   const [error, setError] = useState('');
   const [page, setPage] = useState(1);
-  const [claimId, setClaimId] = useState('');
+  const [q, setQ] = useState('');
+  const query = useDebounced(q);
+
+  // A new search starts at the first page, or page 3 of the old result shows.
+  useEffect(() => { setPage(1); }, [query]);
 
   const load = useCallback(() => {
     setRes(null);
-    api.get('/users/audit', { params: { page, limit: 50, ...(claimId ? { claimId } : {}) } })
+    api.get('/users/audit', { params: { page, limit: 50, ...(query ? { q: query } : {}) } })
       .then(({ data }) => setRes(data))
       .catch((e) => setError(errorText(e)));
-  }, [page, claimId]);
+  }, [page, query]);
 
   useEffect(load, [load]);
 
@@ -31,18 +36,16 @@ export default function AuditTrail() {
       <Alert kind="error">{error}</Alert>
 
       <Card>
-        <div className="row">
-          <input
-            placeholder="Filter by claim ID, e.g. CLM-AS-26-00901"
-            style={{ flex: 1, minWidth: 240, padding: '7px 10px', border: '1px solid var(--border-strong)', borderRadius: 3 }}
-            onKeyDown={(e) => { if (e.key === 'Enter') { setClaimId(e.target.value.trim()); setPage(1); } }}
-          />
-          {claimId && <button className="btn sm" onClick={() => { setClaimId(''); setPage(1); }}>Clear</button>}
+        <SearchBox
+          value={q}
+          onSearch={setQ}
+          placeholder="Search claim ID, person, action or remark…"
+        >
           <button className="btn sm" onClick={() =>
             downloadFile('/reports/audit.xlsx').catch((e) => setError(errorText(e)))}>
             Export Excel
           </button>
-        </div>
+        </SearchBox>
       </Card>
 
       <Card

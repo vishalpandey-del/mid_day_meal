@@ -140,7 +140,6 @@ export const downloadTemplate = asyncHandler(async (req, res) => {
   ];
 
   const wb = buildWorkbook({
-    sheetName: 'School Master',
     headers,
     rows: [example],
     title: 'Vidyaposhan · School Master Template — replace the example row with your data',
@@ -219,7 +218,6 @@ export const exportCredentials = asyncHandler(async (req, res) => {
   const rows = created.map((c) => [c.userId, c.name, c.role, c.scope, c.password]);
 
   const wb = buildWorkbook({
-    sheetName: 'Logins',
     headers,
     rows,
     title: `Vidyaposhan · Login Credentials · ${todayStamp()} — HANDLE CONFIDENTIALLY`,

@@ -14,12 +14,20 @@ const autoWidth = (sheet, headers, rows) => {
   });
 };
 
-/** Standard report sheet: dark header row, frozen pane, auto filter. */
-export const buildWorkbook = ({ sheetName = 'Sheet1', headers, rows, title }) => {
+/**
+ * Standard report sheet: dark header row, frozen pane, auto filter.
+ *
+ * Every sheet this produces is called "Sheet1". Downstream tools — PFMS
+ * among them — look the sheet up by that name, so it is fixed here rather
+ * than left to each caller to remember.
+ */
+export const SHEET_NAME = 'Sheet1';
+
+export const buildWorkbook = ({ headers, rows, title }) => {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Vidyaposhan · SSA Assam';
   wb.created = new Date();
-  const ws = wb.addWorksheet(sheetName, {
+  const ws = wb.addWorksheet(SHEET_NAME, {
     views: [{ state: 'frozen', ySplit: title ? 2 : 1 }],
   });
 
@@ -78,13 +86,12 @@ export const buildBeneficiaryWorkbook = (claims) => {
   });
 
   const wb = buildWorkbook({
-    sheetName: 'Beneficiary Details',
     headers,
     rows,
     title: 'Add Beneficiary Details',
   });
 
-  const ws = wb.getWorksheet('Beneficiary Details');
+  const ws = wb.getWorksheet(SHEET_NAME);
   // Amount column formatted to 5 decimals, as PFMS expects lakh values.
   ws.getColumn(7).numFmt = '0.00000';
   ws.getColumn(7).alignment = { horizontal: 'right' };

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api, { downloadFile, errorText } from '../api/client.js';
-import { Alert, Badge, Card, Confirm, Empty, PageHead, Spinner, Tile } from '../components/UI.jsx';
+import { Alert, Badge, Card, Confirm, Empty, PageHead, SearchBox, Spinner, Tile } from '../components/UI.jsx';
 import { dateOf, inr } from '../utils/format.js';
+import useDebounced from '../utils/useDebounced.js';
 
 /**
  * The DC payment desk. Bills sit in one of three states:
@@ -18,6 +19,8 @@ const TABS = [
 
 export default function Payments() {
   const [tab, setTab] = useState('Unpaid');
+  const [q, setQ] = useState('');
+  const query = useDebounced(q);
   const [res, setRes] = useState(null);
   const [counts, setCounts] = useState({});
   const [error, setError] = useState('');
@@ -30,7 +33,7 @@ export default function Payments() {
 
   const load = useCallback(() => {
     setRes(null);
-    api.get('/claims', { params: { status: 'Approved', paymentStatus: tab, limit: 100 } })
+    api.get('/claims', { params: { status: 'Approved', paymentStatus: tab, q: query || undefined, limit: 100 } })
       .then(({ data }) => setRes(data))
       .catch((e) => setError(errorText(e)));
 
@@ -42,7 +45,7 @@ export default function Payments() {
           .catch(() => [t.key, 0])
       )
     ).then((rows) => setCounts(Object.fromEntries(rows)));
-  }, [tab]);
+  }, [tab, query]);
 
   useEffect(load, [load]);
 
@@ -74,8 +77,9 @@ export default function Payments() {
         <button
           className="btn primary sm"
           onClick={() =>
-            downloadFile('/reports/beneficiary.xlsx', tab === 'Paid' ? { includePaid: 'true' } : {})
-              .then((n) => setNote(`Downloaded ${n}. Those bills are now stamped as exported.`))
+            /* The file follows the tab, so each one exports what it shows. */
+            downloadFile('/reports/beneficiary.xlsx', { paymentStatus: tab })
+              .then((n) => setNote(`Downloaded ${n} — the ${active.label.toLowerCase()} bills.`))
               .then(load)
               .catch((e) => setError(errorText(e)))
           }
@@ -112,6 +116,14 @@ export default function Payments() {
           </button>
         </Alert>
       )}
+
+      <Card>
+        <SearchBox
+          value={q}
+          onSearch={setQ}
+          placeholder="Search bill number, vendor or school…"
+        />
+      </Card>
 
       <div className="pill-tabs">
         {TABS.map((t) => (

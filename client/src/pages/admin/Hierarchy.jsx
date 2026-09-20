@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import api, { errorText } from '../../api/client.js';
-import { Alert, Badge, Card, Empty, PageHead, Spinner, Tile } from '../../components/UI.jsx';
+import { Alert, Badge, Card, Empty, PageHead, SearchBox, Spinner, Tile } from '../../components/UI.jsx';
 
 /** District to Block to School coverage, with the login gaps called out. */
 export default function Hierarchy() {
+  const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [open, setOpen] = useState({});
@@ -23,9 +24,28 @@ export default function Hierarchy() {
   const t = data.totals;
   const gaps = t.missingDcLogins + t.missingBlockLogins;
 
+  /*
+   * The whole tree is already loaded, so searching narrows it in place: a
+   * district stays if it matches, or if any block under it does, and only
+   * the matching blocks are listed beneath it.
+   */
+  const needle = q.trim().toLowerCase();
+  const hit = (...vals) => vals.some((v) => String(v || '').toLowerCase().includes(needle));
+  const tree = !needle ? data.hierarchy : data.hierarchy
+    .map((d) => {
+      if (hit(d.district, d.districtId)) return d;
+      const blocks = d.blocks.filter((b) => hit(b.block, b.blockId));
+      return blocks.length ? { ...d, blocks } : null;
+    })
+    .filter(Boolean);
+
   return (
     <>
       <PageHead title="Hierarchy" subtitle="District to block to school, with login coverage at each level." />
+
+      <Card>
+        <SearchBox value={q} onSearch={setQ} placeholder="Search district or block…" />
+      </Card>
 
       <div className="tiles">
         <Tile label="Districts" value={t.districts} />
@@ -43,9 +63,9 @@ export default function Hierarchy() {
         </Alert>
       )}
 
-      {data.hierarchy.length === 0 ? (
-        <Card><Empty>No master data uploaded yet.</Empty></Card>
-      ) : data.hierarchy.map((d) => (
+      {tree.length === 0 ? (
+        <Card><Empty>{needle ? 'No district or block matches that.' : 'No master data uploaded yet.'}</Empty></Card>
+      ) : tree.map((d) => (
         <Card
           key={d.districtId}
           title={
@@ -58,12 +78,12 @@ export default function Hierarchy() {
           actions={
             <button className="btn sm"
                     onClick={() => setOpen((o) => ({ ...o, [d.districtId]: !o[d.districtId] }))}>
-              {open[d.districtId] ? 'Hide' : 'Show'} {d.blocks.length} block(s)
+              {open[d.districtId] || needle ? 'Hide' : 'Show'} {d.blocks.length} block(s)
             </button>
           }
           padded={false}
         >
-          {open[d.districtId] && (
+          {(open[d.districtId] || Boolean(needle)) && (
             <div className="table-wrap">
               <table>
                 <thead>

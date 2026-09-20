@@ -46,6 +46,8 @@ export default function App() {
 
   const admin = ['admin'];
   const adminState = ['admin', 'state'];
+  // A DC administers the block and school logins in its own district.
+  const userAdmin = ['admin', 'dc'];
 
   return (
     <Routes>
@@ -64,7 +66,7 @@ export default function App() {
         <Route path="admin/master" element={<Guard roles={admin}><MasterUpload /></Guard>} />
         <Route path="admin/logins" element={<Guard roles={admin}><LoginManager /></Guard>} />
         <Route path="admin/hierarchy" element={<Guard roles={adminState}><Hierarchy /></Guard>} />
-        <Route path="admin/users" element={<Guard roles={admin}><Users /></Guard>} />
+        <Route path="admin/users" element={<Guard roles={userAdmin}><Users /></Guard>} />
         <Route path="admin/audit" element={<Guard roles={adminState}><AuditTrail /></Guard>} />
         <Route path="*" element={<div className="alert error">Page not found.</div>} />
       </Route>

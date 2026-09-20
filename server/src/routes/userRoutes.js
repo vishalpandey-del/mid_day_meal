@@ -30,6 +30,13 @@ router.use(protect);
 
 const admin = authorize(ROLES.ADMIN);
 
+/*
+ * The DC administers its own district alongside the admin. The controller
+ * narrows every one of these to the district, so this gate opens the door
+ * and the scope decides what is behind it.
+ */
+const userAdmin = authorize(ROLES.ADMIN, ROLES.DC);
+
 /* Notifications belong to the signed-in user, so no role gate. */
 router.get('/notifications', listNotifications);
 router.patch('/notifications/read-all', markAllNotificationsRead);
@@ -39,11 +46,11 @@ router.patch('/notifications/:id/read', markNotificationRead);
 router.get('/audit', authorize(ROLES.STATE, ROLES.ADMIN), listAuditLogs);
 
 /* User administration */
-router.route('/').get(admin, listUsers).post(admin, validate(userSchema), createUser);
+router.route('/').get(userAdmin, listUsers).post(userAdmin, validate(userSchema), createUser);
 router.post('/bulk-school-users', admin, bulkCreateSchoolUsers);
-router.put('/:id', admin, validate(userUpdateSchema), updateUser);
-router.post('/:id/reset-password', admin, validate(resetPasswordSchema), resetPassword);
-router.patch('/:id/status', admin, validate(statusSchema), toggleUserStatus);
+router.put('/:id', userAdmin, validate(userUpdateSchema), updateUser);
+router.post('/:id/reset-password', userAdmin, validate(resetPasswordSchema), resetPassword);
+router.patch('/:id/status', userAdmin, validate(statusSchema), toggleUserStatus);
 
 /* Transfers — the posting moves, the pending work stays with the post. */
 router.get('/:id/transfer-preview', admin, transferPreview);

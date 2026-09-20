@@ -81,8 +81,9 @@ export default function Dashboard() {
       <Card title="Pipeline">
         <div className="tiles" style={{ marginBottom: 0 }}>
           <Tile label="With Checker" value={k.pendingChecker} />
-          <Tile label="With Block" value={k.pendingBlock} />
-          <Tile label="With DC" value={(k.pending || 0) - (k.pendingChecker || 0) - (k.pendingBlock || 0) - (k.returned || 0)} />
+          {/* Claims raised before the block stage was removed still count
+              toward the DC, which is where they were moved. */}
+          <Tile label="With DC" value={(k.pending || 0) - (k.pendingChecker || 0) - (k.returned || 0)} />
           <Tile label="Under Query" value={k.underQuery} tone="purple" />
           <Tile label="Returned" value={k.returned} tone="red" />
         </div>

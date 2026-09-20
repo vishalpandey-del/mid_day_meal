@@ -89,6 +89,10 @@ h2 { font-size: 20px; font-weight: 800; letter-spacing: -.5px; margin: 0; }
   position: sticky;
   top: 0;
   height: 100vh;
+  /* A flex child stretches to the row's height by default, which on a long
+     page leaves the navy ending mid-scroll. Pinning it to the top keeps the
+     panel exactly one screen tall, which is what sticky needs to work. */
+  align-self: flex-start;
 }
 
 .sidebar .brand {
@@ -520,4 +524,204 @@ details[open] > summary::before { content: '▾ '; }
   .grid2, .grid3 { grid-template-columns: 1fr; }
   .content { padding: 16px 14px 40px; }
   .topbar { padding: 0 14px; }
+}
+
+/* ---- Search bar, shared by every list screen ---- */
+.searchbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.searchbar .search-input {
+  flex: 1;
+  min-width: 220px;
+  padding: 8px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  font: inherit;
+  background: var(--white);
+  color: var(--txt);
+}
+.searchbar .search-input:focus {
+  outline: none;
+  border-color: var(--sky);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+.searchbar select {
+  padding: 8px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  font: inherit;
+  background: var(--white);
+  color: var(--txt);
+}
+
+/* ==========================  Sign-in  ==================================== */
+/* Two panels: what the portal is, and the one form to fill in. Below 860px
+   the brand panel steps aside and only the form remains. */
+
+.signin {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  background: var(--ink);
+}
+
+.signin-brand {
+  position: relative;
+  padding: 56px 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  color: #fff;
+  overflow: hidden;
+}
+.signin-brand::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 15% 70%, rgba(14, 165, 233, 0.22), transparent 55%),
+    radial-gradient(ellipse at 85% 15%, rgba(30, 52, 100, 0.65), transparent 55%);
+}
+.signin-brand > * { position: relative; z-index: 1; }
+
+.signin-mark { display: flex; align-items: center; gap: 14px; margin-bottom: 44px; }
+.signin-logo {
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  background: linear-gradient(135deg, var(--sky), #0056A8);
+  display: grid;
+  place-items: center;
+  font-size: 23px;
+  box-shadow: 0 6px 18px rgba(14, 165, 233, 0.4);
+  flex-shrink: 0;
+}
+.signin-mark h1 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.signin-mark p { margin: 1px 0 0; font-size: 12px; color: rgba(255, 255, 255, 0.62); }
+
+.signin-brand h2 {
+  margin: 0 0 12px;
+  font-size: 31px;
+  line-height: 1.22;
+  font-weight: 800;
+  letter-spacing: -0.7px;
+  max-width: 13ch;
+}
+.signin-lede {
+  margin: 0 0 40px;
+  font-size: 14px;
+  line-height: 1.65;
+  color: rgba(255, 255, 255, 0.72);
+  max-width: 44ch;
+}
+
+.signin-flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 20px; }
+.signin-flow li { display: flex; gap: 14px; align-items: flex-start; }
+.signin-step {
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: rgba(14, 165, 233, 0.16);
+  border: 1px solid rgba(14, 165, 233, 0.5);
+  color: #7DD3FC;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.signin-flow strong { display: block; font-size: 13.5px; font-weight: 700; }
+.signin-flow span:not(.signin-step) {
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+  max-width: 40ch;
+}
+
+.signin-foot {
+  margin: 48px 0 0;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.3px;
+}
+
+.signin-panel {
+  background: var(--surf);
+  display: grid;
+  place-items: center;
+  padding: 40px 24px;
+}
+.signin-form {
+  background: var(--white);
+  border-radius: 16px;
+  padding: 38px 40px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 20px 50px rgba(11, 25, 41, 0.12);
+  border: 1px solid var(--bd);
+}
+.signin-form h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.4px;
+}
+.signin-hint { margin: 5px 0 26px; font-size: 12.5px; color: var(--txt-m); line-height: 1.5; }
+
+/* The reveal button sits inside the field, so the input keeps room for it. */
+.signin-pw { position: relative; }
+.signin-pw input { padding-right: 62px; width: 100%; }
+.signin-pw button {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--sky-d);
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.signin-pw button:hover { background: var(--sky-g); }
+
+.signin-go {
+  width: 100%;
+  justify-content: center;
+  padding: 12px;
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.signin-note {
+  margin: 18px 0 0;
+  font-size: 12px;
+  color: var(--txt-m);
+  text-align: center;
+}
+.signin-secure {
+  margin: 14px 0 0;
+  font-size: 11px;
+  color: var(--txt-l);
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  .signin { grid-template-columns: 1fr; }
+  /* On a phone the story is scrolling past the form; the form comes first. */
+  .signin-brand { display: none; }
+  .signin-panel { min-height: 100vh; }
 }

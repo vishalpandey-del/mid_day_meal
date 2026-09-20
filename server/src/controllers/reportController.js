@@ -6,11 +6,7 @@ import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { claimScope, toObjectId } from '../utils/scope.js';
 import { logAudit } from '../services/auditService.js';
-import {
-  buildWorkbook,
-  buildBeneficiaryWorkbook,
-  sendWorkbook,
-} from '../services/excelService.js';
+import { buildWorkbook, buildBeneficiaryWorkbook, sendWorkbook, SHEET_NAME } from '../services/excelService.js';
 import { AUDIT_ACTIONS, CLAIM_STATUS, PAYABLE_STATES, PAYMENT_STATUS, ROLES } from '../config/constants.js';
 import { todayStamp } from '../utils/format.js';
 
@@ -81,12 +77,11 @@ export const exportClaims = asyncHandler(async (req, res) => {
   ]);
 
   const wb = buildWorkbook({
-    sheetName: 'Claims',
     headers,
     rows,
     title: `Vidyaposhan · Claim Register · ${todayStamp()}`,
   });
-  wb.getWorksheet('Claims').getColumn(12).numFmt = '#,##0.00';
+  wb.getWorksheet(SHEET_NAME).getColumn(12).numFmt = '#,##0.00';
 
   await logAudit({
     req,
@@ -110,14 +105,34 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
   // Approved-only is enforced, not merely defaulted.
   filter.status = CLAIM_STATUS.APPROVED;
 
-  // Default to bills still owed money — never paid, or paid and reversed.
-  // `includePaid=true` widens it to everything approved.
-  if (req.query.includePaid !== 'true') filter.paymentStatus = { $in: PAYABLE_STATES };
+  /*
+   * The file follows the tab the DC is looking at. Standing on "Awaiting
+   * Payment" exports what is awaiting payment, "Paid" exports what was paid,
+   * "Payment Reversed" exports what bounced — and a bill that was paid and
+   * then reversed is reversed, so it leaves the paid file and joins that one.
+   * `paymentStatus` is a single state, never a set, so the two can't overlap.
+   *
+   * With no tab named, the default stays what it was: everything still owed
+   * money. `includePaid=true` widens that to everything approved.
+   */
+  const tab = req.query.paymentStatus;
+  if (tab) {
+    if (!Object.values(PAYMENT_STATUS).includes(tab)) {
+      throw ApiError.badRequest(
+        `"${tab}" is not a payment state. Use ${Object.values(PAYMENT_STATUS).join(', ')}.`
+      );
+    }
+    filter.paymentStatus = tab;
+  } else if (req.query.includePaid !== 'true') {
+    filter.paymentStatus = { $in: PAYABLE_STATES };
+  }
 
   const claims = await fetchClaims(filter);
   if (!claims.length) {
     throw ApiError.badRequest(
-      'No approved claims match this filter, so there is nothing to export.'
+      tab
+        ? `No approved claims are sitting in "${tab}", so there is nothing to export.`
+        : 'No approved claims match this filter, so there is nothing to export.'
     );
   }
 
@@ -132,7 +147,8 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
     );
   }
 
-  const fileName = `pfms-beneficiary-${todayStamp()}.xlsx`;
+  const slug = tab ? `-${tab.toLowerCase().replace(/\s+/g, '-')}` : '';
+  const fileName = `pfms-beneficiary${slug}-${todayStamp()}.xlsx`;
   const wb = buildBeneficiaryWorkbook(claims);
 
   // Stamp the claims before streaming, so the record exists even if the
@@ -158,7 +174,7 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
     req,
     action: AUDIT_ACTIONS.EXPORT,
     detail:
-      `PFMS beneficiary file — ${claims.length} approved claim(s) · ` +
+      `PFMS beneficiary file${tab ? ` (${tab})` : ''} — ${claims.length} approved claim(s) · ` +
       `${claims.map((c) => c.claimId).join(', ').slice(0, 500)}`,
   });
 
@@ -204,12 +220,11 @@ export const exportSlaReport = asyncHandler(async (req, res) => {
     .sort((a, b) => b[8] - a[8]);
 
   const wb = buildWorkbook({
-    sheetName: 'SLA Monitor',
     headers,
     rows,
     title: `Vidyaposhan · SLA Monitor · reminder ${cfg.sla.reminderDay}d / breach ${cfg.sla.breachDay}d`,
   });
-  wb.getWorksheet('SLA Monitor').getColumn(6).numFmt = '#,##0.00';
+  wb.getWorksheet(SHEET_NAME).getColumn(6).numFmt = '#,##0.00';
 
   await logAudit({ req, action: AUDIT_ACTIONS.EXPORT, detail: `SLA report — ${rows.length} row(s)` });
 
@@ -266,12 +281,11 @@ export const exportBlockSummary = asyncHandler(async (req, res) => {
   });
 
   const wb = buildWorkbook({
-    sheetName: 'Block Summary',
     headers,
     rows,
     title: `Vidyaposhan · Block-wise Summary · ${todayStamp()}`,
   });
-  const ws = wb.getWorksheet('Block Summary');
+  const ws = wb.getWorksheet(SHEET_NAME);
   [4, 6, 7].forEach((col) => { ws.getColumn(col).numFmt = '#,##0.00'; });
 
   await logAudit({ req, action: AUDIT_ACTIONS.EXPORT, detail: `Block summary — ${rows.length} block(s)` });
@@ -307,7 +321,6 @@ export const exportAuditLog = asyncHandler(async (req, res) => {
   ]);
 
   const wb = buildWorkbook({
-    sheetName: 'Audit Trail',
     headers,
     rows,
     title: `Vidyaposhan · Audit Trail · ${todayStamp()}`,

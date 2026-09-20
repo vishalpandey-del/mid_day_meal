@@ -78,3 +78,25 @@ export const Confirm = ({ open, title, children, onCancel, onConfirm, confirmLab
     </div>
   );
 };
+
+/**
+ * One search box, used on every list screen so they all behave the same.
+ *
+ * Typing filters as you go — there is no button to find and no Enter to
+ * remember. `onSearch` is called with the trimmed text; debouncing, if the
+ * screen needs it, belongs to the caller.
+ */
+export const SearchBox = ({ value, onSearch, placeholder = 'Search…', children }) => (
+  <div className="searchbar">
+    <input
+      className="search-input"
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => onSearch(e.target.value)}
+    />
+    {children}
+    {value && (
+      <button className="btn sm" onClick={() => onSearch('')}>Clear</button>
+    )}
+  </div>
+);

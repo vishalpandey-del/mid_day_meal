@@ -3,29 +3,24 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { errorText } from '../api/client.js';
 
 /**
- * Picking a role prefills the matching demo User ID, so a reviewer can sign
- * in without remembering six different ids.
+ * Everyone signs in at the same place with the id their office was issued —
+ * the portal reads the role from the account, so there is nothing to pick
+ * and nothing to get wrong. The left panel says what the portal is; the
+ * right panel is the only thing to fill in.
  */
-const ROLE_CARDS = [
-  { key: 'school', icon: '🏫', label: 'School', sub: 'Maker & Checker', userId: 'MKR18140100' },
-  { key: 'block', icon: '🏢', label: 'Block Office', sub: 'Review & forward', userId: 'BLK180101' },
-  { key: 'dc', icon: '🏛️', label: 'District (DC)', sub: 'Approve & pay', userId: 'DC1801' },
-  { key: 'state', icon: '📊', label: 'SSA / State', sub: 'State monitoring', userId: 'STATE001' },
+const STAGES = [
+  ['Raise', 'The school enters the bill with its vendor and scheme details.'],
+  ['Verify', 'The school checker reviews it and sends it to the district.'],
+  ['Approve', 'The district office approves and releases the payment.'],
 ];
 
 export default function Login() {
   const { login } = useAuth();
-  const [picked, setPicked] = useState('');
   const [userId, setUserId] = useState('');
   const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-
-  const pick = (r) => {
-    setPicked(r.key);
-    setUserId(r.userId);
-    setError('');
-  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -41,89 +36,93 @@ export default function Login() {
   };
 
   return (
-    <div className="login-page">
-      <form className="login-box" onSubmit={submit}>
-        <div className="row" style={{ gap: 10, marginBottom: 6, flexWrap: 'nowrap' }}>
-          <div
-            style={{
-              width: 38, height: 38, borderRadius: 10,
-              background: 'linear-gradient(135deg,var(--sky),#0056A8)',
-              display: 'grid', placeItems: 'center', fontSize: 20,
-              boxShadow: '0 4px 12px rgba(14,165,233,.35)', flexShrink: 0,
-            }}
-          >
-            📚
+    <div className="signin">
+      <section className="signin-brand">
+        <div className="signin-mark">
+          <span className="signin-logo">📚</span>
+          <div>
+            <h1>Vidyaposhan</h1>
+            <p>SSA Assam · Dhubri District</p>
           </div>
-          <h1>Vidyaposhan</h1>
-        </div>
-        <div className="sub">SSA Assam · Online Bill Claim Management Portal</div>
-
-        {error && <div className="alert error">{error}</div>}
-
-        <div
-          style={{
-            fontSize: 11, fontWeight: 700, color: 'var(--txt-m)',
-            marginBottom: 10, textTransform: 'uppercase', letterSpacing: '.5px',
-          }}
-        >
-          Select your role to continue
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 20 }}>
-          {ROLE_CARDS.map((r) => (
-            <button
-              key={r.key}
-              type="button"
-              onClick={() => pick(r)}
-              style={{
-                padding: '11px 8px',
-                border: `2px solid ${picked === r.key ? 'var(--sky)' : 'var(--bd)'}`,
-                borderRadius: 10,
-                textAlign: 'center',
-                background: picked === r.key ? 'var(--sky-g)' : 'var(--surf)',
-                transition: 'all .15s',
-              }}
-            >
-              <div style={{ fontSize: 20, marginBottom: 4 }}>{r.icon}</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)' }}>{r.label}</div>
-              <div style={{ fontSize: 10, color: 'var(--txt-m)', marginTop: 1 }}>{r.sub}</div>
-            </button>
+        <h2>Online Bill Claim Management</h2>
+        <p className="signin-lede">
+          One record for every school bill, from the day it is raised to the day
+          the money reaches the vendor.
+        </p>
+
+        <ol className="signin-flow">
+          {STAGES.map(([name, what], i) => (
+            <li key={name}>
+              <span className="signin-step">{i + 1}</span>
+              <div>
+                <strong>{name}</strong>
+                <span>{what}</span>
+              </div>
+            </li>
           ))}
-        </div>
+        </ol>
 
-        <div className="field">
-          <label>User ID</label>
-          <input
-            value={userId}
-            onChange={(e) => setUserId(e.target.value)}
-            placeholder="e.g. MKR18140100"
-            autoFocus
-            required
-          />
-        </div>
-        <div className="field">
-          <label>Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter your password"
-            required
-          />
-        </div>
+        <p className="signin-foot">Government of Assam · Samagra Shiksha</p>
+      </section>
 
-        <button
-          className="btn primary"
-          style={{ width: '100%', justifyContent: 'center', padding: 11, fontSize: 14, marginTop: 4 }}
-          disabled={busy}
-        >
-          {busy ? 'Signing in…' : 'Sign in securely →'}
-        </button>
+      <section className="signin-panel">
+        <form className="signin-form" onSubmit={submit}>
+          <h2>Sign in</h2>
+          <p className="signin-hint">
+            Use the user ID issued to your office. It decides what you see.
+          </p>
 
-        <div style={{ textAlign: 'center', marginTop: 14, fontSize: 11, color: 'var(--txt-l)' }}>
-          🔒 Government of Assam Portal · All sessions are logged
-        </div>
-      </form>
+          {error && <div className="alert error">{error}</div>}
+
+          <div className="field">
+            <label htmlFor="userId">User ID</label>
+            <input
+              id="userId"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value.toUpperCase())}
+              placeholder="Enter your user ID"
+              autoComplete="username"
+              autoCapitalize="characters"
+              spellCheck="false"
+              autoFocus
+              required
+            />
+          </div>
+
+          <div className="field">
+            <label htmlFor="password">Password</label>
+            <div className="signin-pw">
+              <input
+                id="password"
+                type={show ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                onClick={() => setShow((v) => !v)}
+                aria-label={show ? 'Hide password' : 'Show password'}
+              >
+                {show ? 'Hide' : 'Show'}
+              </button>
+            </div>
+          </div>
+
+          <button className="btn primary signin-go" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+
+          <p className="signin-note">
+            Forgotten your password? Your district office can reset it.
+          </p>
+          <p className="signin-secure">🔒 Every sign-in and action on this portal is recorded.</p>
+        </form>
+      </section>
     </div>
   );
 }

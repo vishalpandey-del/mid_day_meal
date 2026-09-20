@@ -1,12 +1,13 @@
 import User from '../models/User.js';
 import School from '../models/School.js';
+import Block from '../models/Block.js';
 import Notification from '../models/Notification.js';
 import AuditLog from '../models/AuditLog.js';
 import ApiError from '../utils/ApiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import { logAudit } from '../services/auditService.js';
 import { AUDIT_ACTIONS, ROLES, SCHOOL_ROLES } from '../config/constants.js';
-import { safeRegex } from '../utils/scope.js';
+import { safeRegex, userAdminScope, manageableRoles } from '../utils/scope.js';
 import {
   transferUser,
   describeCurrentPosting,
@@ -14,18 +15,55 @@ import {
 } from '../services/transferService.js';
 
 /* ------------------------------------------------------------------ *
- * User administration (admin only)
+ * User administration
+ *
+ * The admin manages everyone. A DC manages its own district — the block
+ * offices under it and the school logins under those — so a wrong name or a
+ * forgotten password is fixed locally instead of waiting on the state.
+ * Every handler here resolves that scope first and refuses anything outside
+ * it, so the route guard alone is never what keeps a DC in its district.
  * ------------------------------------------------------------------ */
+
+/** The scope for this request, or a 403 if the role manages nobody. */
+const scopeFor = async (user) => {
+  const scope = await userAdminScope(user, { School, Block });
+  if (!scope) throw ApiError.forbidden('Your role does not manage user accounts.');
+  return scope;
+};
+
+/** Loads a user only if the signed-in administrator may act on them. */
+const findInScope = async (id, actor, select) => {
+  const scope = await scopeFor(actor);
+  const q = User.findOne({ $and: [{ _id: id }, scope] });
+  if (select) q.select(select);
+  const user = await q;
+  if (!user) {
+    throw ApiError.notFound('That user is not in your district, or does not exist.');
+  }
+  return user;
+};
+
+/** Refuses a role the administrator is not allowed to hand out. */
+const assertRoleAllowed = (role, actor) => {
+  if (!role) return;
+  const allowed = manageableRoles(actor);
+  if (!allowed.includes(role)) {
+    throw ApiError.forbidden(
+      `You cannot manage "${role}" accounts. You may manage: ${allowed.join(', ')}.`
+    );
+  }
+};
 
 export const listUsers = asyncHandler(async (req, res) => {
   const { role, q, active, page = 1, limit = 50 } = req.query;
-  const filter = {};
+  const filter = { $and: [await scopeFor(req.user)] };
 
   if (role) filter.role = role;
   if (active !== undefined) filter.isActive = active === 'true';
   if (q) {
-    const rx = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    filter.$or = [{ name: rx }, { userId: rx }, { email: rx }];
+    const rx = safeRegex(q);
+    // Nested under $and so a search never widens the district scope.
+    filter.$and.push({ $or: [{ name: rx }, { userId: rx }, { email: rx }, { designation: rx }] });
   }
 
   const perPage = Math.min(Number(limit) || 50, 200);
@@ -55,6 +93,7 @@ export const listUsers = asyncHandler(async (req, res) => {
 /** POST /api/users — role determines which scope field is mandatory. */
 export const createUser = asyncHandler(async (req, res) => {
   const { role, school, block, dcOffice } = req.body;
+  assertRoleAllowed(role, req.user);
 
   if (SCHOOL_ROLES.includes(role) && !school) {
     throw ApiError.badRequest('A school maker/checker must be linked to a school.');
@@ -89,6 +128,10 @@ export const createUser = asyncHandler(async (req, res) => {
 export const updateUser = asyncHandler(async (req, res) => {
   const { password, ...safe } = req.body;
 
+  // Check the target is in scope before writing, and the new role too.
+  await findInScope(req.params.id, req.user);
+  assertRoleAllowed(safe.role, req.user);
+
   const user = await User.findByIdAndUpdate(req.params.id, safe, {
     new: true,
     runValidators: true,
@@ -110,8 +153,7 @@ export const updateUser = asyncHandler(async (req, res) => {
 
 /** POST /api/users/:id/reset-password — admin sets a new password directly. */
 export const resetPassword = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id).select('+password');
-  if (!user) throw ApiError.notFound('User not found.');
+  const user = await findInScope(req.params.id, req.user, '+password');
 
   user.password = req.body.newPassword;
   await user.save();
@@ -131,8 +173,7 @@ export const toggleUserStatus = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('You cannot deactivate your own account.');
   }
 
-  const user = await User.findById(req.params.id);
-  if (!user) throw ApiError.notFound('User not found.');
+  const user = await findInScope(req.params.id, req.user);
 
   user.isActive = req.body.isActive;
   await user.save({ validateBeforeSave: false });
@@ -233,8 +274,16 @@ export const markAllNotificationsRead = asyncHandler(async (req, res) => {
  * ------------------------------------------------------------------ */
 
 export const listAuditLogs = asyncHandler(async (req, res) => {
-  const { action, claimId, userId, from, to, page = 1, limit = 50 } = req.query;
+  const { action, claimId, userId, q, from, to, page = 1, limit = 50 } = req.query;
   const filter = {};
+
+  // One box that searches the whole line: who did it, to what, and the note.
+  if (q) {
+    const rx = safeRegex(q);
+    filter.$or = [
+      { userName: rx }, { userId: rx }, { claimId: rx }, { detail: rx }, { action: rx },
+    ];
+  }
 
   if (action) filter.action = action;
   if (claimId) filter.claimId = claimId.toUpperCase();

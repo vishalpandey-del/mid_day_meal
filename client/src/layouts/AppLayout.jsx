@@ -1,12 +1,15 @@
+import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { ROLE_LABEL } from '../utils/format.js';
+import api, { errorText } from '../api/client.js';
+import { Alert, Confirm, Field } from '../components/UI.jsx';
 
 /** Which screens each role is allowed to reach. */
 const NAV = [
   { group: 'Overview', items: [
     { to: '/', label: 'Dashboard', roles: '*', end: true },
-    { to: '/queue', label: 'My Queue', roles: ['school_maker', 'school_checker', 'block', 'dc'] },
+    { to: '/queue', label: 'My Queue', roles: ['school_maker', 'school_checker', 'dc'] },
   ]},
   { group: 'My Network', items: [
     // The label names whatever sits directly under this role.
@@ -30,7 +33,7 @@ const NAV = [
     { to: '/admin/master', label: 'Master Upload', roles: ['admin'] },
     { to: '/admin/logins', label: 'Login Manager', roles: ['admin'] },
     { to: '/admin/hierarchy', label: 'Hierarchy', roles: ['admin', 'state'] },
-    { to: '/admin/users', label: 'Users & Transfers', roles: ['admin'] },
+    { to: '/admin/users', label: 'Users & Transfers', roles: ['admin', 'dc'] },
     { to: '/admin/audit', label: 'Audit Trail', roles: ['admin', 'state'] },
   ]},
 ];
@@ -43,6 +46,36 @@ const initials = (name = '') =>
 export default function AppLayout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  // Everyone can change their own password, whatever their role.
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pw, setPw] = useState({ currentPassword: '', newPassword: '', confirm: '' });
+  const [pwErr, setPwErr] = useState('');
+  const [pwNote, setPwNote] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+
+  const openPw = () => {
+    setPw({ currentPassword: '', newPassword: '', confirm: '' });
+    setPwErr(''); setPwNote(''); setPwOpen(true);
+  };
+
+  const savePw = async () => {
+    if (pw.newPassword.length < 6) return setPwErr('The new password must be at least 6 characters.');
+    if (pw.newPassword !== pw.confirm) return setPwErr('The two new passwords do not match.');
+    setPwBusy(true); setPwErr('');
+    try {
+      await api.post('/auth/change-password', {
+        currentPassword: pw.currentPassword,
+        newPassword: pw.newPassword,
+      });
+      setPwOpen(false);
+      setPwNote('Your password has been changed.');
+    } catch (e) {
+      setPwErr(errorText(e));
+    } finally {
+      setPwBusy(false);
+    }
+  };
 
   const place =
     user?.school?.name ||
@@ -93,15 +126,43 @@ export default function AppLayout() {
               <span>{user?.userId}</span>
             </div>
             <div className="avatar" title={user?.name}>{initials(user?.name)}</div>
+            <button className="btn sm" onClick={openPw}>My Account</button>
             <button className="btn sm" onClick={() => { logout(); navigate('/login'); }}>
               Sign out
             </button>
           </div>
         </header>
         <main className="content">
+          {pwNote && <Alert kind="ok">{pwNote}</Alert>}
           <Outlet />
         </main>
       </div>
+
+      <Confirm
+        open={pwOpen}
+        title="Change your password"
+        onCancel={() => setPwOpen(false)}
+        onConfirm={savePw}
+        confirmLabel="Change Password"
+        busy={pwBusy}
+      >
+        <p className="small muted">
+          Signed in as <strong>{user?.userId}</strong> · {ROLE_LABEL[user?.role] || user?.role}
+        </p>
+        {pwErr && <Alert kind="error">{pwErr}</Alert>}
+        <Field label="Current password">
+          <input type="password" value={pw.currentPassword} autoFocus
+                 onChange={(e) => setPw({ ...pw, currentPassword: e.target.value })} />
+        </Field>
+        <Field label="New password" hint="At least 6 characters.">
+          <input type="password" value={pw.newPassword}
+                 onChange={(e) => setPw({ ...pw, newPassword: e.target.value })} />
+        </Field>
+        <Field label="Confirm new password">
+          <input type="password" value={pw.confirm}
+                 onChange={(e) => setPw({ ...pw, confirm: e.target.value })} />
+        </Field>
+      </Confirm>
     </div>
   );
 }

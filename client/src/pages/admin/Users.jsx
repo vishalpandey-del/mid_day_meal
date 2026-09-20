@@ -2,16 +2,28 @@ import { useCallback, useEffect, useState } from 'react';
 import api, { errorText } from '../../api/client.js';
 import { Alert, Badge, Card, Confirm, Empty, Field, PageHead, Spinner } from '../../components/UI.jsx';
 import { dateOf, ROLE_LABEL } from '../../utils/format.js';
+import { useAuth } from '../../context/AuthContext.jsx';
 
 const ROLES = ['school_maker', 'school_checker', 'block', 'dc', 'state', 'admin'];
 
 /** User administration: search, activate/deactivate, reset password, transfer. */
 export default function Users() {
+  const { user } = useAuth();
   const [res, setRes] = useState(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [filters, setFilters] = useState({ role: '', q: '', page: 1 });
   const [busy, setBusy] = useState('');
+
+  // The role decides which scope field an account needs, and a DC may only
+  // hand out the roles below it.
+  const canManage = user.role === 'admin'
+    ? ROLES
+    : ['school_maker', 'school_checker', 'block'];
+
+  // Edit / create dialog state
+  const [editing, setEditing] = useState(null);   // the user, or 'new'
+  const [form, setForm] = useState({});
 
   // Transfer dialog state
   const [moving, setMoving] = useState(null);
@@ -48,6 +60,42 @@ export default function Users() {
     try { await fn(); setNote(ok); load(); }
     catch (e) { setError(errorText(e)); }
     finally { setBusy(''); }
+  };
+
+  const openEdit = (u) => {
+    setError(''); setNote('');
+    setEditing(u || 'new');
+    setForm(u
+      ? { name: u.name, designation: u.designation || '', mobile: u.mobile || '', email: u.email || '' }
+      : { userId: '', name: '', password: '', role: canManage[0], designation: '', mobile: '', email: '',
+          school: '', block: '', dcOffice: '' });
+  };
+
+  const saveEdit = async () => {
+    const isNew = editing === 'new';
+    setBusy(isNew ? 'new' : editing._id);
+    setError('');
+    try {
+      if (isNew) {
+        const body = { ...form };
+        // Only the scope field the chosen role actually uses is sent.
+        if (!['school_maker', 'school_checker'].includes(body.role)) delete body.school;
+        if (body.role !== 'block') delete body.block;
+        if (body.role !== 'dc') delete body.dcOffice;
+        Object.keys(body).forEach((k) => { if (body[k] === '') delete body[k]; });
+        await api.post('/users', body);
+        setNote(`${form.userId} created.`);
+      } else {
+        await api.put(`/users/${editing._id}`, form);
+        setNote(`${editing.userId} updated.`);
+      }
+      setEditing(null);
+      load();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy('');
+    }
   };
 
   const openTransfer = async (u) => {
@@ -96,7 +144,14 @@ export default function Users() {
 
   return (
     <>
-      <PageHead title="Users & Transfers" subtitle="A transfer moves the posting; the login id and password stay the same." />
+      <PageHead
+        title="Users & Transfers"
+        subtitle={user.role === 'dc'
+          ? 'The block and school logins in your district. A transfer moves the posting; the login id and password stay the same.'
+          : 'A transfer moves the posting; the login id and password stay the same.'}
+      >
+        <button className="btn primary sm" onClick={() => openEdit(null)}>Add User</button>
+      </PageHead>
       <Alert kind="error">{error}</Alert>
       <Alert kind="ok">{note}</Alert>
 
@@ -111,7 +166,7 @@ export default function Users() {
                   onChange={(e) => setFilters({ ...filters, role: e.target.value, page: 1 })}
                   style={{ padding: '7px 10px', border: '1px solid var(--border-strong)', borderRadius: 3 }}>
             <option value="">All roles</option>
-            {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+            {canManage.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
           </select>
           {(filters.role || filters.q) && (
             <button className="btn sm" onClick={() => setFilters({ role: '', q: '', page: 1 })}>Clear</button>
@@ -153,6 +208,8 @@ export default function Users() {
                     <td className="small muted">{u.lastLoginAt ? dateOf(u.lastLoginAt) : 'Never'}</td>
                     <td>
                       <div className="row">
+                        <button className="btn sm" disabled={busy === u._id}
+                                onClick={() => openEdit(u)}>Edit</button>
                         {!['state', 'admin'].includes(u.role) && (
                           <button className="btn sm" disabled={busy === u._id}
                                   onClick={() => openTransfer(u)}>Transfer</button>
@@ -181,6 +238,77 @@ export default function Users() {
           </div>
         )}
       </Card>
+
+      <Confirm
+        open={Boolean(editing)}
+        title={editing === 'new' ? 'Add a user' : `Edit ${editing?.userId || ''}`}
+        onCancel={() => setEditing(null)}
+        onConfirm={saveEdit}
+        confirmLabel={editing === 'new' ? 'Create' : 'Save'}
+        busy={busy === 'new' || busy === editing?._id}
+      >
+        {editing === 'new' && (
+          <>
+            <Field label="Login ID" hint="What they type to sign in — it cannot be changed later.">
+              <input value={form.userId || ''} autoFocus
+                     onChange={(e) => setForm({ ...form, userId: e.target.value.toUpperCase() })}
+                     placeholder="e.g. MKR18140100" />
+            </Field>
+            <Field label="Role">
+              <select value={form.role || ''} onChange={(e) => setForm({ ...form, role: e.target.value })}>
+                {canManage.map((r) => <option key={r} value={r}>{ROLE_LABEL[r] || r}</option>)}
+              </select>
+            </Field>
+            {['school_maker', 'school_checker'].includes(form.role) && (
+              <Field label="School">
+                <select value={form.school || ''} onChange={(e) => setForm({ ...form, school: e.target.value })}>
+                  <option value="">— Select school —</option>
+                  {options.schools.map((o) => <option key={o._id} value={o._id}>{o.name} ({o.code})</option>)}
+                </select>
+              </Field>
+            )}
+            {form.role === 'block' && (
+              <Field label="Block">
+                <select value={form.block || ''} onChange={(e) => setForm({ ...form, block: e.target.value })}>
+                  <option value="">— Select block —</option>
+                  {options.blocks.map((o) => <option key={o._id} value={o._id}>{o.name}</option>)}
+                </select>
+              </Field>
+            )}
+            {form.role === 'dc' && (
+              <Field label="District office">
+                <select value={form.dcOffice || ''} onChange={(e) => setForm({ ...form, dcOffice: e.target.value })}>
+                  <option value="">— Select district —</option>
+                  {options.districts.map((o) => <option key={o._id} value={o._id}>{o.district}</option>)}
+                </select>
+              </Field>
+            )}
+            <Field label="Password" hint="At least 6 characters. They can change it after signing in.">
+              <input value={form.password || ''} type="text"
+                     onChange={(e) => setForm({ ...form, password: e.target.value })} />
+            </Field>
+          </>
+        )}
+        <Field label="Name">
+          <input value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </Field>
+        <Field label="Designation">
+          <input value={form.designation || ''}
+                 onChange={(e) => setForm({ ...form, designation: e.target.value })}
+                 placeholder="e.g. Head Teacher (Maker)" />
+        </Field>
+        <Field label="Mobile">
+          <input value={form.mobile || ''} onChange={(e) => setForm({ ...form, mobile: e.target.value })} />
+        </Field>
+        <Field label="Email">
+          <input value={form.email || ''} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </Field>
+        {editing !== 'new' && (
+          <p className="small muted">
+            The login id and password are not changed here — use Reset for a password.
+          </p>
+        )}
+      </Confirm>
 
       <Confirm
         open={Boolean(moving)}
