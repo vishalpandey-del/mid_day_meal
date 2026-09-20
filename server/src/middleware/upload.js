@@ -32,7 +32,11 @@ const ALLOWED = ['application/pdf', 'image/jpeg', 'image/png'];
  * multer below that means the user gets a real message instead. MongoDB's
  * own 16 MB document limit is the ceiling when running elsewhere.
  */
-const SERVERLESS_BODY_LIMIT_MB = 4;
+// Vercel's ceiling is 4.5 MB for the whole request. Multipart framing and the
+// form fields ride along with the file, and anything at or past the ceiling is
+// dropped before the function runs — no JSON, which the browser shows as a
+// network error. 3.5 leaves room for the envelope so multer answers first.
+const SERVERLESS_BODY_LIMIT_MB = 3.5;
 const configuredMb = Number(process.env.MAX_UPLOAD_MB || 10);
 export const maxUploadMb = process.env.VERCEL
   ? Math.min(configuredMb, SERVERLESS_BODY_LIMIT_MB)
