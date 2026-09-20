@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import api, { downloadFile, errorText } from '../api/client.js';
 import { Alert, Badge, Card, Empty, Spinner, PageHead } from '../components/UI.jsx';
 import { dateOf, inr } from '../utils/format.js';
+import useOpenRow from '../utils/useOpenRow.js';
 
 const STATUSES = [
   'Draft', 'Pending Checker Review', 'Pending Block Review', 'Submitted',
@@ -11,9 +12,29 @@ const STATUSES = [
 
 /** Every claim within the caller's scope, with filters and paging. */
 export default function ClaimList() {
+  const openRow = useOpenRow();
+  const [params, setParams] = useSearchParams();
   const [res, setRes] = useState(null);
   const [error, setError] = useState('');
-  const [filters, setFilters] = useState({ status: '', q: '', page: 1 });
+
+  /*
+   * The filters live in the URL, so a link can point at a particular slice —
+   * "the rejected bills", say — and land on it. Reading them from state alone
+   * meant such a link quietly showed everything instead.
+   */
+  const filters = {
+    status: params.get('status') || '',
+    q: params.get('q') || '',
+    page: Number(params.get('page')) || 1,
+  };
+  const setFilters = (next) => {
+    const merged = typeof next === 'function' ? next(filters) : next;
+    const clean = {};
+    Object.entries(merged).forEach(([k, v]) => {
+      if (v !== '' && v != null && !(k === 'page' && Number(v) === 1)) clean[k] = String(v);
+    });
+    setParams(clean, { replace: true });
+  };
 
   const load = useCallback(() => {
     setRes(null);
@@ -23,7 +44,9 @@ export default function ClaimList() {
     api.get('/claims', { params })
       .then(({ data }) => setRes(data))
       .catch((e) => setError(errorText(e)));
-  }, [filters]);
+    // Depend on the values, not the object: `filters` is rebuilt every render,
+    // so naming it here would re-fetch forever.
+  }, [filters.status, filters.q, filters.page]);
 
   useEffect(load, [load]);
 
@@ -86,13 +109,13 @@ export default function ClaimList() {
                 <tr>
                   <th>Claim ID</th><th>School</th><th>Block</th><th>Scheme</th>
                   <th>Vendor</th><th className="num">Amount</th>
-                  <th>Status</th><th>Payment</th><th>Bill Date</th>
+                  <th>Status</th><th>Payment</th><th>Bill Date</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {res.claims.map((c) => (
-                  <tr key={c._id}>
-                    <td><Link to={`/claims/${c._id}`}><strong>{c.claimId}</strong></Link></td>
+                  <tr key={c._id} {...openRow(`/claims/${c._id}`, `Open ${c.claimId}`)}>
+                    <td><strong>{c.claimId}</strong></td>
                     <td>{c.school?.name}</td>
                     <td className="small muted">{c.block?.name || c.school?.block}</td>
                     <td className="small">{c.category}</td>
@@ -101,6 +124,7 @@ export default function ClaimList() {
                     <td><Badge>{c.status}</Badge></td>
                     <td>{c.status === 'Approved' ? <Badge>{c.paymentStatus}</Badge> : <span className="muted">—</span>}</td>
                     <td className="small">{dateOf(c.billDate)}</td>
+                    <td className="go">open →</td>
                   </tr>
                 ))}
               </tbody>

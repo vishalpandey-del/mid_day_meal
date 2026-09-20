@@ -596,6 +596,64 @@ export const rejectClaim = asyncHandler(async (req, res) => {
   res.json({ success: true, claim });
 });
 
+/**
+ * POST /api/claims/:id/reopen — the DC undoes a rejection.
+ *
+ * A rejection is final for the school: it cannot edit the bill, cannot send
+ * it again, and the money is released back to the allocation. That is right
+ * when the bill was genuinely wrong, but it leaves nothing to do when the
+ * rejection was a mistake, or when the school has since produced what was
+ * missing. Only the DC rejects, so only the DC undoes it — and it goes back
+ * to the school rather than straight to Approved, so the correction is made
+ * and reviewed rather than assumed.
+ */
+export const reopenClaim = asyncHandler(async (req, res) => {
+  const claim = await Claim.findById(req.params.id).populate('school', 'name');
+  if (!claim) throw ApiError.notFound('Claim not found.');
+  assertCanView(claim, req.user);
+
+  if (claim.status !== CLAIM_STATUS.REJECTED) {
+    throw ApiError.badRequest(
+      `Only a rejected bill can be reopened. This one is "${claim.status}".`
+    );
+  }
+
+  const remarks = req.body.remarks;
+  const now = new Date();
+
+  claim.status = CLAIM_STATUS.RETURNED;
+  claim.returnReason = remarks;
+  claim.dcRemarks = remarks;
+  // The earlier decision no longer stands; the SLA clock restarts when the
+  // bill next reaches the DC.
+  claim.decidedAt = null;
+  claim.approvedAt = null;
+  claim.submittedAt = null;
+  claim.paymentStatus = PAYMENT_STATUS.UNPAID;
+
+  claim.pushHistory(AUDIT_ACTIONS.CLAIM_REOPENED, req.user, remarks);
+  await claim.save();
+
+  await logAudit({
+    req,
+    action: AUDIT_ACTIONS.CLAIM_REOPENED,
+    claimId: claim.claimId,
+    detail: `Rejection withdrawn · ${remarks}`,
+  });
+
+  await notify({
+    recipients: await recipientsForRole(ROLES.SCHOOL_MAKER, {
+      school: claim.school?._id || claim.school,
+    }),
+    icon: '↩️',
+    title: `Claim ${claim.claimId} reopened`,
+    body: `The district has withdrawn the rejection. ${remarks}`,
+    claim,
+  });
+
+  res.json({ success: true, claim });
+});
+
 /** POST /api/claims/:id/query — raise a query; this pauses the SLA clock. */
 export const queryClaim = asyncHandler(async (req, res) => {
   const claim = await Claim.findById(req.params.id).populate('school', 'name');

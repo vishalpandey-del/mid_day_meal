@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import api, { downloadFile, errorText } from '../../api/client.js';
 import { Alert, Badge, Card, Empty, PageHead, SearchBox, Spinner } from '../../components/UI.jsx';
 import { dateTimeOf, ROLE_LABEL } from '../../utils/format.js';
@@ -70,7 +71,11 @@ export default function AuditTrail() {
                     <td><Badge tone={TONE[l.action] || 'grey'}>{l.action}</Badge></td>
                     <td className="small">{l.userName}</td>
                     <td className="small muted">{ROLE_LABEL[l.role] || l.role}</td>
-                    <td className="small">{l.claimId ? <code>{l.claimId}</code> : '—'}</td>
+                    <td className="small">
+                      {l.claimId
+                        ? <Link to={`/claims/${l.claimId}`}><code>{l.claimId}</code></Link>
+                        : '—'}
+                    </td>
                     <td className="small" style={{ maxWidth: 380 }}>{l.detail}</td>
                   </tr>
                 ))}

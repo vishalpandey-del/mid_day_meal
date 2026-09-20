@@ -96,11 +96,8 @@ export const buildBeneficiaryWorkbook = (claims) => {
   ws.getColumn(7).numFmt = '0.00000';
   ws.getColumn(7).alignment = { horizontal: 'right' };
 
-  const total = rows.reduce((s, r) => s + Number(r[6] || 0), 0);
-  const totalRow = ws.addRow(['', '', '', '', '', 'TOTAL', Number(total.toFixed(5)), '']);
-  totalRow.font = { bold: true };
-  totalRow.getCell(7).numFmt = '0.00000';
-
+  // No total row: PFMS reads every row after the header as a beneficiary, and
+  // a trailing "TOTAL" line is one more record to it, with no account number.
   return wb;
 };
 

@@ -78,6 +78,7 @@ export const AUDIT_ACTIONS = {
   CLAIM_APPROVED: 'Claim Approved',
   CLAIM_BULK_APPROVED: 'Claims Bulk Approved',
   CLAIM_REJECTED: 'Claim Rejected',
+  CLAIM_REOPENED: 'Rejection Withdrawn',
   CLAIM_QUERIED: 'Marked Under Query',
   QUERY_RESPONDED: 'Query Response Submitted',
   CLAIM_RESUBMITTED: 'Claim Resubmitted',

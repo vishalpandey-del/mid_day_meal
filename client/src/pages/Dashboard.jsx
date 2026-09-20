@@ -8,6 +8,7 @@ import api, { errorText } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Alert, Badge, Card, Spinner, Tile } from '../components/UI.jsx';
 import { inr, lakhs } from '../utils/format.js';
+import useOpenRow from '../utils/useOpenRow.js';
 
 // Distinct hues at similar lightness, so no single slice dominates.
 const SLICE = ['#1a73e8', '#0f9d58', '#f4a100', '#7b3fa8', '#d93025', '#00838f', '#5f6368', '#c1272d'];
@@ -15,6 +16,7 @@ const SLICE = ['#1a73e8', '#0f9d58', '#f4a100', '#7b3fa8', '#d93025', '#00838f',
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const openRow = useOpenRow();
   const [data, setData] = useState(null);
   const [network, setNetwork] = useState(null);
   const [error, setError] = useState('');
@@ -256,16 +258,17 @@ export default function Dashboard() {
             <div className="table-wrap">
               <table>
                 <thead>
-                  <tr><th>Claim</th><th>School</th><th>Status</th><th className="num">Amount</th><th className="num">Age</th></tr>
+                  <tr><th>Claim</th><th>School</th><th>Status</th><th className="num">Amount</th><th className="num">Age</th><th></th></tr>
                 </thead>
                 <tbody>
                   {data.breaching.map((c) => (
-                    <tr key={c.claimId}>
-                      <td><Link to={`/claims/${c.claimId}`}>{c.claimId}</Link></td>
+                    <tr key={c.claimId} {...openRow(`/claims/${c.claimId}`, `Open ${c.claimId}`)}>
+                      <td><strong>{c.claimId}</strong></td>
                       <td>{c.school}</td>
                       <td><Badge>{c.status}</Badge></td>
                       <td className="num">{inr(c.amount)}</td>
                       <td className="num"><Badge tone="red">{c.ageDays}d</Badge></td>
+                      <td className="go">open →</td>
                     </tr>
                   ))}
                 </tbody>

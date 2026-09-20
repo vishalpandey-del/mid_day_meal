@@ -89,6 +89,11 @@ export const rejectSchema = z.object({
   remarks: z.string().trim().min(5, 'A rejection reason of at least 5 characters is required'),
 });
 
+/** Withdrawing a rejection is a decision reversed, so it is written down. */
+export const reopenSchema = z.object({
+  remarks: z.string().trim().min(5, 'Explain why the rejection is being withdrawn (at least 5 characters)'),
+});
+
 export const querySchema = z.object({
   queryText: z.string().trim().min(5, 'Describe what the school needs to correct'),
 });

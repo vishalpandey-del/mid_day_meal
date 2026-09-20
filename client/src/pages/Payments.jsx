@@ -4,6 +4,7 @@ import api, { downloadFile, errorText } from '../api/client.js';
 import { Alert, Badge, Card, Confirm, Empty, PageHead, SearchBox, Spinner, Tile } from '../components/UI.jsx';
 import { dateOf, inr } from '../utils/format.js';
 import useDebounced from '../utils/useDebounced.js';
+import useOpenRow from '../utils/useOpenRow.js';
 
 /**
  * The DC payment desk. Bills sit in one of three states:
@@ -18,6 +19,7 @@ const TABS = [
 ];
 
 export default function Payments() {
+  const openRow = useOpenRow();
   const [tab, setTab] = useState('Unpaid');
   const [q, setQ] = useState('');
   const query = useDebounced(q);
@@ -156,9 +158,9 @@ export default function Payments() {
               </thead>
               <tbody>
                 {res.claims.map((c) => (
-                  <tr key={c._id}>
+                  <tr key={c._id} {...openRow(`/claims/${c._id}`, `Open ${c.claimId}`)}>
                     <td>
-                      <Link to={`/claims/${c._id}`}><strong>{c.claimId}</strong></Link>
+                      <strong>{c.claimId}</strong>
                       {c.reversalCount > 0 && (
                         <div className="small" style={{ color: 'var(--rose-d)' }}>
                           reversed {c.reversalCount}×
@@ -183,7 +185,9 @@ export default function Payments() {
                         ? <Badge tone="blue">{dateOf(c.lastExportedAt)}</Badge>
                         : <span className="muted">—</span>}
                     </td>
-                    <td>
+                    {/* The buttons here act on the bill; they must not also
+                        open it, so this cell keeps its clicks. */}
+                    <td onClick={(e) => e.stopPropagation()}>
                       <div className="row">
                         {tab === 'Unpaid' && (
                           <button className="btn green sm" disabled={busy === c._id}

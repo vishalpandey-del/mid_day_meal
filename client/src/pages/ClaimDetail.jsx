@@ -66,6 +66,8 @@ export default function ClaimDetail() {
   const canDc = role === 'dc' && ['Submitted', 'Resubmitted', 'Under Query'].includes(s);
   const canPay = role === 'dc' && s === 'Approved';
   const canRevise = role === 'dc' && claim.lastExportedAt;
+  // A rejection is the DC's decision, so only the DC can take it back.
+  const canReopen = role === 'dc' && s === 'Rejected';
 
   const act = {
     forward: () => api.post(`/claims/${id}/forward`, { remarks: text }),
@@ -80,12 +82,14 @@ export default function ClaimDetail() {
     },
     submit: () => api.post(`/claims/${id}/submit`),
     revise: () => api.patch(`/claims/${id}/revise-status`, { status: 'Rejected', remarks: text }),
+    reopen: () => api.post(`/claims/${id}/reopen`, { remarks: text }),
   };
 
   const LABEL = {
     forward: 'Forward with remark', return: 'Return to maker',
     approve: 'Approve', reject: 'Reject', query: 'Raise query',
     respond: 'Respond to query', revise: 'Revise status after export',
+    reopen: 'Withdraw the rejection',
   };
 
   return (
@@ -206,10 +210,15 @@ export default function ClaimDetail() {
                     Mark {claim.paymentStatus === 'Paid' ? 'Unpaid' : 'Paid'}
                   </button>
                 )}
+                {canReopen && (
+                  <button className="btn" onClick={() => setAction('reopen')}>
+                    Withdraw Rejection
+                  </button>
+                )}
                 {canRevise && <button className="btn red" onClick={() => setAction('revise')}>Revise Status</button>}
 
                 {!canMakerEdit && !canMakerSubmit && !canMakerRespond && !canChecker &&
-                 !canDc && !canPay && !canRevise && (
+                 !canDc && !canPay && !canRevise && !canReopen && (
                   <div className="muted small">
                     No action is available to you for a bill in “{s}”.
                   </div>
@@ -228,6 +237,7 @@ export default function ClaimDetail() {
                       action === 'approve' ? 'Optional remark'
                       : action === 'query' ? 'What must the school clarify?'
                       : action === 'revise' ? 'Why is this changing after the file was downloaded?'
+                      : action === 'reopen' ? 'Why is the rejection being withdrawn?'
                       : 'Enter your remark'
                     }
                   />

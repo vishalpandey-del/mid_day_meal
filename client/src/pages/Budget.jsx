@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import api, { errorText } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Alert, Badge, Card, Empty, Field, PageHead, Spinner, Tile } from '../components/UI.jsx';
-import { Link } from 'react-router-dom';
 import { dateOf, inr, lakhs } from '../utils/format.js';
+import useOpenRow from '../utils/useOpenRow.js';
 
 const Bar = ({ used, of }) => {
   const pct = of ? Math.min((used / of) * 100, 100) : 0;
@@ -19,6 +19,7 @@ const Bar = ({ used, of }) => {
  * schools see only their own position.
  */
 export default function Budget() {
+  const openRow = useOpenRow();
   const { user } = useAuth();
   const role = user?.role;
   const isState = ['state', 'admin'].includes(role);
@@ -229,8 +230,8 @@ export default function Budget() {
               </thead>
               <tbody>
                 {ledger.entries.map((e) => (
-                  <tr key={e.claimId}>
-                    <td><Link to={`/claims/${e.claimId}`}><strong>{e.claimId}</strong></Link></td>
+                  <tr key={e.claimId} {...openRow(`/claims/${e.claimId}`, `Open ${e.claimId}`)}>
+                    <td><strong>{e.claimId}</strong></td>
                     <td className="small">{e.category}</td>
                     <td><code>{e.budgetHead}</code></td>
                     <td className="small">{dateOf(e.billDate)}</td>

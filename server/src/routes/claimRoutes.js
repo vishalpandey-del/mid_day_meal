@@ -8,6 +8,7 @@ import {
   deleteClaim,
   forwardClaim,
   returnClaim,
+  reopenClaim,
   approveClaim,
   bulkApproveClaims,
   rejectClaim,
@@ -29,6 +30,7 @@ import {
   reviewRemarkSchema,
   returnSchema,
   rejectSchema,
+  reopenSchema,
   querySchema,
   queryResponseSchema,
   bulkApproveSchema,
@@ -68,6 +70,7 @@ router.post('/:id/return', reviewer, validate(returnSchema), returnClaim);
 /* DC decisions */
 router.post('/:id/approve', dc, validate(remarksSchema), approveClaim);
 router.post('/:id/reject', dc, validate(rejectSchema), rejectClaim);
+router.post('/:id/reopen', dc, validate(reopenSchema), reopenClaim);
 router.post('/:id/query', dc, validate(querySchema), queryClaim);
 
 /* Payment tracking and post-export corrections are DC-only. */

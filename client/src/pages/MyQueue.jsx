@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import api, { errorText } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Alert, Badge, Card, Confirm, Empty, SearchBox, Spinner } from '../components/UI.jsx';
 import { dateOf, inr } from '../utils/format.js';
+import useOpenRow from '../utils/useOpenRow.js';
 
 /**
  * The signed-in user's own action queue. For the DC this doubles as the
  * bulk-approval screen: tick several bills and clear them in one go.
  */
 export default function MyQueue() {
+  const openRow = useOpenRow();
   const [q, setQ] = useState('');
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -155,9 +157,11 @@ export default function MyQueue() {
               </thead>
               <tbody>
                 {shown.map((c) => (
-                  <tr key={c._id}>
+                  <tr key={c._id} {...openRow(`/claims/${c._id}`, `Open ${c.claimId}`)}>
                     {isDc && (
-                      <td>
+                      /* Ticking a box is selecting, not opening, so the cell
+                         keeps the click to itself. */
+                      <td onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={picked.has(c._id)}
@@ -165,7 +169,7 @@ export default function MyQueue() {
                         />
                       </td>
                     )}
-                    <td><Link to={`/claims/${c._id}`}><strong>{c.claimId}</strong></Link></td>
+                    <td><strong>{c.claimId}</strong></td>
                     <td>{c.school?.name}</td>
                     <td className="small">{c.category}</td>
                     <td className="small">{c.vendorName}</td>
