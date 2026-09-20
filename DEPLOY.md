@@ -95,6 +95,12 @@ such as `/login` is handled by the router instead of returning 404.
 
 ## Known limits
 
+**Region.** `server/vercel.json` pins the function to `bom1` (Mumbai) because
+the Atlas cluster is there. Left to its default the function ran in
+Washington, and every query crossed the Atlantic — around 1.1 seconds of
+waiting per dashboard load. Keep the two in the same region; if the cluster
+moves, change `regions` to match.
+
 **Cold starts.** The first request after a quiet period waits for the function
 to boot and the database handshake — a few seconds. Subsequent requests are
 fast.
