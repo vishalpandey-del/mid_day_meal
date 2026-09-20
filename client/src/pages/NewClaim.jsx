@@ -24,13 +24,19 @@ export default function NewClaim() {
   // The server's ceiling depends on where it runs, so it is asked rather
   // than assumed; a file over it is rejected here instead of failing mid-upload.
   const [maxMb, setMaxMb] = useState(4);
+  // Vercel measures the whole request, so three small pages can be refused
+  // together even though each one passes. The total is checked as well.
+  const [maxTotalMb, setMaxTotalMb] = useState(4);
   const [budget, setBudget] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.get('/master/categories').then(({ data }) => setCategories(data.categories)).catch(() => {});
-    api.get('/limits').then(({ data }) => setMaxMb(data.maxUploadMb)).catch(() => {});
+    api.get('/limits').then(({ data }) => {
+      setMaxMb(data.maxUploadMb);
+      setMaxTotalMb(data.maxRequestMb ?? data.maxUploadMb);
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -154,7 +160,7 @@ export default function NewClaim() {
           <legend>4 · Bill Documents</legend>
           <Field
             label="Attach bill copy"
-            hint={`PDF, JPG or PNG · up to ${maxMb} MB each · required before submitting`}
+            hint={`PDF, JPG or PNG · up to ${maxMb} MB each, ${maxTotalMb} MB in total · required before submitting`}
           >
             <input
               type="file"
@@ -162,15 +168,24 @@ export default function NewClaim() {
               accept=".pdf,.jpg,.jpeg,.png"
               onChange={(e) => {
                 const picked = [...e.target.files];
+                const reject = (msg) => {
+                  setError(msg);
+                  e.target.value = '';
+                  setFiles([]);
+                };
                 const tooBig = picked.filter((f) => f.size > maxMb * 1024 * 1024);
                 if (tooBig.length) {
-                  setError(
+                  return reject(
                     `${tooBig.map((f) => f.name).join(', ')} — each file must be under ${maxMb} MB. ` +
                       'Scan at a lower resolution or split the document.'
                   );
-                  e.target.value = '';
-                  setFiles([]);
-                  return;
+                }
+                const total = picked.reduce((sum, f) => sum + f.size, 0);
+                if (total > maxTotalMb * 1024 * 1024) {
+                  return reject(
+                    `Those ${picked.length} files come to ${(total / 1024 / 1024).toFixed(1)} MB together, ` +
+                      `and one bill can carry ${maxTotalMb} MB. Attach fewer pages, or scan in black and white.`
+                  );
                 }
                 setError('');
                 setFiles(picked);
@@ -180,6 +195,8 @@ export default function NewClaim() {
           {files.length > 0 && (
             <div className="small muted">
               {files.map((f) => `${f.name} (${Math.round(f.size / 1024)} KB)`).join(' · ')}
+              {' · '}
+              {(files.reduce((s2, f) => s2 + f.size, 0) / 1024 / 1024).toFixed(1)} MB of {maxTotalMb} MB
             </div>
           )}
         </fieldset>

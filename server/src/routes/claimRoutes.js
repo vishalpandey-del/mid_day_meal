@@ -20,7 +20,7 @@ import {
 } from '../controllers/claimController.js';
 import { protect, authorize } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { uploadBill } from '../middleware/upload.js';
+import { uploadBill, enforceTotalUploadSize } from '../middleware/upload.js';
 import { ROLES } from '../config/constants.js';
 import {
   claimSchema,
@@ -39,7 +39,8 @@ import {
 const router = Router();
 router.use(protect);
 
-const files = uploadBill.array('documents', 10);
+/* The size guard runs first so an oversized batch is answered, not dropped. */
+const files = [enforceTotalUploadSize, uploadBill.array('documents', 10)];
 const maker = authorize(ROLES.SCHOOL_MAKER);
 const reviewer = authorize(ROLES.SCHOOL_CHECKER, ROLES.BLOCK);
 const dc = authorize(ROLES.DC);

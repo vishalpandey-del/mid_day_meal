@@ -43,6 +43,25 @@ export const maxUploadMb = process.env.VERCEL
   : Math.min(configuredMb, 15);
 const maxMb = maxUploadMb;
 
+/**
+ * The ceiling above is per file, but Vercel measures the whole request. A bill
+ * scanned as three separate pages can clear the per-file check and still be
+ * dropped in one piece, which is the network error again. So the request as a
+ * whole gets the same budget, enforced here rather than by the platform.
+ */
+export const maxRequestMb = maxUploadMb;
+
+export const enforceTotalUploadSize = (req, _res, next) => {
+  const declared = Number(req.headers['content-length'] || 0);
+  if (declared && declared > maxRequestMb * 1024 * 1024) {
+    return next(ApiError.badRequest(
+      `Those documents come to ${(declared / 1024 / 1024).toFixed(1)} MB together, and the limit is `
+      + `${maxRequestMb} MB per bill. Attach fewer pages, or scan them in black and white to shrink them.`,
+    ));
+  }
+  next();
+};
+
 const billFilter = (_req, file, cb) => {
   if (!ALLOWED.includes(file.mimetype)) {
     return cb(ApiError.badRequest('Only PDF, JPEG or PNG files are accepted.'));
