@@ -326,10 +326,12 @@ export const getConfig = asyncHandler(async (_req, res) => {
 });
 
 export const updateConfig = asyncHandler(async (req, res) => {
-  const config = await Config.getGlobal();
+  // getGlobal returns a lean object, so fetch a real document to save.
+  const config = (await Config.findOne({ key: 'global' })) || (await Config.create({ key: 'global' }));
   if (req.body.sla) Object.assign(config.sla, req.body.sla);
   if (req.body.notifications) config.notifications = req.body.notifications;
   await config.save();
+  Config.clearCache();
 
   await logAudit({
     req,

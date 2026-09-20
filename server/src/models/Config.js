@@ -44,10 +44,30 @@ const configSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-configSchema.statics.getGlobal = async function () {
-  let cfg = await this.findOne({ key: 'global' });
-  if (!cfg) cfg = await this.create({ key: 'global' });
+/**
+ * The SLA and notification settings are read on nearly every request but
+ * change only when an administrator edits them. On a serverless host each
+ * round trip to Atlas costs real time, so the document is cached in process
+ * and refreshed on a short interval.
+ */
+let cached = null;
+let cachedAt = 0;
+const TTL_MS = 60_000;
+
+configSchema.statics.getGlobal = async function ({ fresh = false } = {}) {
+  if (!fresh && cached && Date.now() - cachedAt < TTL_MS) return cached;
+
+  let cfg = await this.findOne({ key: 'global' }).lean();
+  if (!cfg) cfg = (await this.create({ key: 'global' })).toObject();
+
+  cached = cfg;
+  cachedAt = Date.now();
   return cfg;
+};
+
+/** Called after a write so the next read does not serve stale settings. */
+configSchema.statics.clearCache = function () {
+  cached = null;
 };
 
 export default mongoose.model('Config', configSchema);

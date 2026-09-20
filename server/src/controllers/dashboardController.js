@@ -33,15 +33,19 @@ const QUEUE_FOR_ROLE = {
  */
 export const getDashboard = asyncHandler(async (req, res) => {
   const base = claimScope(req.user);
-  const cfg = await Config.getGlobal();
-  const { reminderDay, breachDay } = cfg.sla;
 
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
   sixMonthsAgo.setDate(1);
   sixMonthsAgo.setHours(0, 0, 0, 0);
 
-  const [byStatus, byCategory, byHead, trend, totals] = await Promise.all([
+  // Everything below is independent, so it goes out together. Each extra
+  // sequential await costs a full round trip to Atlas, which dominates the
+  // response time once the queries themselves are indexed.
+  const myQueueStatuses = QUEUE_FOR_ROLE[req.user.role];
+
+  const [cfg, byStatus, byCategory, byHead, trend, totals, open, myQueue] = await Promise.all([
+    Config.getGlobal(),
     Claim.aggregate([
       { $match: base },
       { $group: { _id: '$status', count: { $sum: 1 }, amount: { $sum: '$amount' } } },
@@ -115,12 +119,19 @@ export const getDashboard = asyncHandler(async (req, res) => {
         },
       },
     ]),
+    // Ageing reuses the ageDays virtual, so these stay as documents.
+    Claim.find({
+      ...base,
+      status: { $in: [CLAIM_STATUS.SUBMITTED, CLAIM_STATUS.RESUBMITTED, CLAIM_STATUS.UNDER_QUERY] },
+    })
+      .select('claimId status submittedAt queryRaisedAt pausedDays amount school')
+      .populate('school', 'name code block'),
+    myQueueStatuses
+      ? Claim.countDocuments({ ...base, status: { $in: myQueueStatuses } })
+      : Promise.resolve(0),
   ]);
 
-  // Ageing reuses the ageDays virtual so paused query time is excluded.
-  const open = await Claim.find({ ...base, status: { $in: [CLAIM_STATUS.SUBMITTED, CLAIM_STATUS.RESUBMITTED, CLAIM_STATUS.UNDER_QUERY] } })
-    .select('claimId status submittedAt queryRaisedAt pausedDays amount school')
-    .populate('school', 'name code block');
+  const { reminderDay, breachDay } = cfg.sla;
 
   const ageing = { normal: 0, reminder: 0, breached: 0 };
   const breaching = [];
@@ -150,12 +161,6 @@ export const getDashboard = asyncHandler(async (req, res) => {
   const approved = statusMap[CLAIM_STATUS.APPROVED] || 0;
   const rejected = statusMap[CLAIM_STATUS.REJECTED] || 0;
   const decided = approved + rejected;
-
-  // How many claims are sitting in THIS user's queue right now.
-  const myQueueStatuses = QUEUE_FOR_ROLE[req.user.role];
-  const myQueue = myQueueStatuses
-    ? await Claim.countDocuments({ ...base, status: { $in: myQueueStatuses } })
-    : 0;
 
   const payload = {
     success: true,
