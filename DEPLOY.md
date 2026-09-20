@@ -52,16 +52,14 @@ https://mid-day-meal-ze1a.vercel.app/api/health
 
 **Settings → General → Root Directory:** `client`
 
-**Settings → Environment Variables:**
+**Environment variables: none required.**
 
-| Name | Value |
-|---|---|
-| `VITE_API_URL` | `https://mid-day-meal-ze1a.vercel.app` |
+`src/api/client.js` falls back to the deployed API for any production build,
+so the site works straight after a deploy.
 
-No trailing slash. The client appends `/api` itself.
-
-This is read at **build** time, not at runtime, so the project must be
-redeployed after the variable is added — restarting is not enough.
+To point the site at a different backend, set `VITE_API_URL` (no trailing
+slash — the client appends `/api`). It is read at **build** time, so the
+project must be redeployed after adding it; restarting is not enough.
 
 ---
 

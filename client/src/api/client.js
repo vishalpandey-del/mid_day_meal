@@ -1,11 +1,27 @@
 import axios from 'axios';
 
+/** The deployed API, used when no override is supplied at build time. */
+const PRODUCTION_API = 'https://mid-day-meal-ze1a.vercel.app';
+
 /**
- * In development Vite proxies /api to the local server, so a relative base
- * works. A deployed build talks to a different origin, so VITE_API_URL points
- * at the API and is baked in at build time.
+ * Where the API lives depends on how the bundle was built:
+ *
+ *   VITE_API_URL set   → that origin wins, so a different backend can be
+ *                        pointed at without touching the code
+ *   development build  → empty, letting Vite proxy /api to localhost:5000
+ *   production build   → the deployed API above
+ *
+ * The production fallback matters because a build with no environment
+ * variable would otherwise look for the API on the site's own domain, where
+ * it does not exist.
  */
-const API_ROOT = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+const resolveApiRoot = () => {
+  const override = (import.meta.env.VITE_API_URL || '').trim();
+  if (override) return override.replace(/\/$/, '');
+  return import.meta.env.DEV ? '' : PRODUCTION_API;
+};
+
+const API_ROOT = resolveApiRoot();
 const api = axios.create({ baseURL: API_ROOT ? `${API_ROOT}/api` : '/api' });
 
 // Every request carries the saved token.
