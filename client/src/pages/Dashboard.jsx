@@ -1,17 +1,13 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import {
-  PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-} from 'recharts';
 import api, { errorText } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Alert, Badge, Card, Spinner, Tile } from '../components/UI.jsx';
 import { inr, lakhs } from '../utils/format.js';
 import useOpenRow from '../utils/useOpenRow.js';
 
-// Distinct hues at similar lightness, so no single slice dominates.
-const SLICE = ['#1a73e8', '#0f9d58', '#f4a100', '#7b3fa8', '#d93025', '#00838f', '#5f6368', '#c1272d'];
+const DashboardCharts = lazy(() => import('./DashboardCharts.jsx'));
+
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -175,65 +171,11 @@ export default function Dashboard() {
         </Card>
       )}
 
-      {isState && data.pie && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(330px,1fr))', gap: 18 }}>
-          <Card title="Claims by Status">
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={data.pie.byStatus} dataKey="value" nameKey="label"
-                     cx="50%" cy="50%" outerRadius={82} label={(e) => e.value}>
-                  {data.pie.byStatus.map((_, i) => <Cell key={i} fill={SLICE[i % SLICE.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v, n) => [`${v} claims`, n]} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </Card>
-
-          <Card title="Amount by Scheme">
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={data.pie.byCategory} dataKey="value" nameKey="label"
-                     cx="50%" cy="50%" outerRadius={82}>
-                  {data.pie.byCategory.map((_, i) => <Cell key={i} fill={SLICE[i % SLICE.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v) => inr(v)} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </Card>
-
-          <Card title="Payment Position">
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={data.pie.payment} dataKey="value" nameKey="label"
-                     cx="50%" cy="50%" outerRadius={82} label={(e) => e.value}>
-                  <Cell fill="#0f9d58" />
-                  <Cell fill="#f4a100" />
-                </Pie>
-                <Tooltip formatter={(v, n, p) => [`${v} claims · ${inr(p.payload.amount)}`, n]} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
-      )}
-
-      {data.trend?.length > 1 && (
-        <Card title="Last 6 Months">
-          <ResponsiveContainer width="100%" height={230}>
-            <BarChart data={data.trend}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#eceef1" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} />
-              <Tooltip formatter={(v, n) => (n === 'amount' ? inr(v) : v)} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="count" name="Claims" fill="#1a73e8" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="approved" name="Approved" fill="#0f9d58" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </Card>
-      )}
+      {/* Charts arrive on their own: the numbers above do not wait for
+          390 KB of charting code, which only the state's pies really need. */}
+      <Suspense fallback={null}>
+        <DashboardCharts pie={data.pie} trend={data.trend} showPies={isState} />
+      </Suspense>
 
       {data.budget?.totals?.allocated > 0 && (
         <Card title={`Budget · FY ${data.budget.financialYear}`}>
