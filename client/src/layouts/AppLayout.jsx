@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { ROLE_LABEL } from '../utils/format.js';
 import api, { errorText } from '../api/client.js';
-import { Alert, Confirm, Field } from '../components/UI.jsx';
+import { Alert, Confirm, Field, Spinner } from '../components/UI.jsx';
 
 /** Which screens each role is allowed to reach. */
 const NAV = [
@@ -135,7 +135,11 @@ export default function AppLayout() {
         </header>
         <main className="content">
           {pwNote && <Alert kind="ok">{pwNote}</Alert>}
-          <Outlet />
+          {/* One boundary for every screen: each is fetched on first open,
+              and the chrome around it stays put while that happens. */}
+          <Suspense fallback={<Spinner />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 

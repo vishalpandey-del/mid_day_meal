@@ -1,26 +1,33 @@
-import { lazy, Suspense } from 'react';
+import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import AppLayout from './layouts/AppLayout.jsx';
 import { Spinner } from './components/UI.jsx';
 
+/*
+ * The sign-in page is the only screen a signed-out visitor can reach, so it
+ * is the only one bundled with the shell. Everything behind the login is
+ * fetched when first opened — otherwise the login page downloads the whole
+ * portal, screens most roles never see included, before anyone has typed a
+ * password.
+ */
 import Login from './pages/Login.jsx';
 // Loaded on demand: it is the only screen that needs the charting library.
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
-import MyQueue from './pages/MyQueue.jsx';
-import ClaimList from './pages/ClaimList.jsx';
-import Network from './pages/Network.jsx';
-import SchoolDetail from './pages/SchoolDetail.jsx';
-import ClaimDetail from './pages/ClaimDetail.jsx';
-import NewClaim from './pages/NewClaim.jsx';
-import Payments from './pages/Payments.jsx';
-import Budget from './pages/Budget.jsx';
-import Reports from './pages/Reports.jsx';
-import MasterUpload from './pages/admin/MasterUpload.jsx';
-import LoginManager from './pages/admin/LoginManager.jsx';
-import Hierarchy from './pages/admin/Hierarchy.jsx';
-import Users from './pages/admin/Users.jsx';
-import AuditTrail from './pages/admin/AuditTrail.jsx';
+const MyQueue = lazy(() => import('./pages/MyQueue.jsx'));
+const ClaimList = lazy(() => import('./pages/ClaimList.jsx'));
+const Network = lazy(() => import('./pages/Network.jsx'));
+const SchoolDetail = lazy(() => import('./pages/SchoolDetail.jsx'));
+const ClaimDetail = lazy(() => import('./pages/ClaimDetail.jsx'));
+const NewClaim = lazy(() => import('./pages/NewClaim.jsx'));
+const Payments = lazy(() => import('./pages/Payments.jsx'));
+const Budget = lazy(() => import('./pages/Budget.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
+const MasterUpload = lazy(() => import('./pages/admin/MasterUpload.jsx'));
+const LoginManager = lazy(() => import('./pages/admin/LoginManager.jsx'));
+const Hierarchy = lazy(() => import('./pages/admin/Hierarchy.jsx'));
+const Users = lazy(() => import('./pages/admin/Users.jsx'));
+const AuditTrail = lazy(() => import('./pages/admin/AuditTrail.jsx'));
 
 /** Blocks a route unless the signed-in user holds one of `roles`. */
 const Guard = ({ roles, children }) => {
@@ -53,7 +60,7 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route element={<AppLayout />}>
-        <Route index element={<Suspense fallback={<Spinner />}><Dashboard /></Suspense>} />
+        <Route index element={<Dashboard />} />
         <Route path="queue" element={<MyQueue />} />
         <Route path="network" element={<Network />} />
         <Route path="network/school/:id" element={<SchoolDetail />} />

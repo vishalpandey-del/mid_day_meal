@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import api, { downloadFile, errorText } from '../api/client.js';
-import { Alert, Badge, Card, Empty, Spinner, PageHead } from '../components/UI.jsx';
+import { Alert, Badge, Card, Empty, SearchBox, Spinner, PageHead } from '../components/UI.jsx';
 import { dateOf, inr } from '../utils/format.js';
 import useOpenRow from '../utils/useOpenRow.js';
+import useDebounced from '../utils/useDebounced.js';
 
 const STATUSES = [
   'Draft', 'Pending Checker Review', 'Pending Block Review', 'Submitted',
@@ -27,6 +28,21 @@ export default function ClaimList() {
     q: params.get('q') || '',
     page: Number(params.get('page')) || 1,
   };
+
+  const set = (patch) => setFilters((f) => ({ ...f, page: 1, ...patch }));
+
+  /*
+   * The box types locally and the URL only learns the settled value. Writing
+   * every keystroke into the URL made one request per character, and the
+   * answers could arrive out of order.
+   */
+  const [typed, setTyped] = useState(filters.q);
+  const settled = useDebounced(typed);
+  useEffect(() => {
+    if (settled !== filters.q) set({ q: settled });
+    // `set` and `filters.q` are derived from the URL, which this updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settled]);
   const setFilters = (next) => {
     const merged = typeof next === 'function' ? next(filters) : next;
     const clean = {};
@@ -50,7 +66,6 @@ export default function ClaimList() {
 
   useEffect(load, [load]);
 
-  const set = (patch) => setFilters((f) => ({ ...f, page: 1, ...patch }));
 
   return (
     <>
@@ -64,27 +79,16 @@ export default function ClaimList() {
       <Alert kind="error">{error}</Alert>
 
       <Card>
-        <div className="row">
-          <input
-            placeholder="Search claim ID, vendor or bill number…"
-            style={{ flex: 1, minWidth: 220, padding: '7px 10px', border: '1px solid var(--border-strong)', borderRadius: 3 }}
-            defaultValue={filters.q}
-            onKeyDown={(e) => { if (e.key === 'Enter') set({ q: e.target.value }); }}
-          />
-          <select
-            value={filters.status}
-            onChange={(e) => set({ status: e.target.value })}
-            style={{ padding: '7px 10px', border: '1px solid var(--border-strong)', borderRadius: 3 }}
-          >
+        <SearchBox
+          value={typed}
+          onSearch={setTyped}
+          placeholder="Search claim ID, vendor, bill number or school…"
+        >
+          <select value={filters.status} onChange={(e) => set({ status: e.target.value })}>
             <option value="">All statuses</option>
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          {(filters.status || filters.q) && (
-            <button className="btn sm" onClick={() => setFilters({ status: '', q: '', page: 1 })}>
-              Clear
-            </button>
-          )}
-        </div>
+        </SearchBox>
       </Card>
 
       <Card

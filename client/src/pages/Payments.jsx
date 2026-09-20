@@ -38,8 +38,18 @@ export default function Payments() {
     api.get('/claims', { params: { status: 'Approved', paymentStatus: tab, q: query || undefined, limit: 100 } })
       .then(({ data }) => setRes(data))
       .catch((e) => setError(errorText(e)));
+  }, [tab, query]);
 
-    // Tab counts, so the desk shows its whole workload at a glance.
+  useEffect(load, [load]);
+
+  /*
+   * The tab counts are the desk's whole workload, which a search does not
+   * change — so they are fetched when the screen opens and after a payment
+   * moves a bill, not on every keystroke. Bundled with the list they turned
+   * one search into four requests.
+   */
+  const [countTick, setCountTick] = useState(0);
+  useEffect(() => {
     Promise.all(
       TABS.map((t) =>
         api.get('/claims', { params: { status: 'Approved', paymentStatus: t.key, limit: 1 } })
@@ -47,9 +57,7 @@ export default function Payments() {
           .catch(() => [t.key, 0])
       )
     ).then((rows) => setCounts(Object.fromEntries(rows)));
-  }, [tab, query]);
-
-  useEffect(load, [load]);
+  }, [countTick]);
 
   const setPayment = async (c, paymentStatus, remarks = '') => {
     setBusy(c._id);
@@ -60,6 +68,8 @@ export default function Payments() {
       setReversing(null);
       setReason('');
       load();
+      // A bill just moved between tabs, so the counts are stale.
+      setCountTick((n) => n + 1);
     } catch (e) {
       setError(errorText(e));
     } finally {
