@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Secrets — only .env.example is committed. The wildcards catch backups and
+# per-environment copies, which is how credentials usually leak.
+.env
+.env.*
+!.env.example
+*.bak
+
+# Uploaded bill documents (user data, never in git)
+server/uploads/
+uploads/
+
+# Build output
+dist/
+build/
+
+# Logs and scratch output
+*.log
+npm-debug.log*
+.__*
+__*.mjs
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
