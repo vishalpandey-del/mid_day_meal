@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import api, { downloadFile, errorText } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { Alert, Badge, Card, Empty, PageHead, Spinner, Tile } from '../components/UI.jsx';
@@ -27,6 +27,7 @@ const TITLE = {
 
 export default function Network() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
   const levels = LEVELS_FOR[user?.role] || ['schools'];
@@ -40,6 +41,22 @@ export default function Network() {
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
+
+  /**
+   * Props that turn a table row into the thing you click.
+   * Keyboard users get the same target, which a click handler alone would
+   * leave out — hence the role, the tab stop and the Enter/Space handler.
+   */
+  const openRow = (go, label) => ({
+    className: 'row-open',
+    onClick: go,
+    role: 'button',
+    tabIndex: 0,
+    title: label,
+    onKeyDown: (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+    },
+  });
 
   const setLevel = (l, extra = {}) => {
     const next = { level: l, ...extra };
@@ -205,7 +222,11 @@ export default function Network() {
                     </thead>
                     <tbody>
                       {rows.map((o) => (
-                        <tr key={o._id}>
+                        <tr
+                          key={o._id}
+                          {...openRow(() => setLevel('blocks', { district: o._id }),
+                            `Open the blocks in ${o.district}`)}
+                        >
                           <td><strong>{o.district}</strong></td>
                           <td><code>{o.districtId}</code></td>
                           <td className="num">{o.blocks}</td>
@@ -216,14 +237,7 @@ export default function Network() {
                           <td className="num">
                             {o.pending ? <Badge tone="amber">{o.pending}</Badge> : <span className="muted">—</span>}
                           </td>
-                          <td>
-                            <button
-                              className="btn sm"
-                              onClick={() => setLevel('blocks', { district: o._id })}
-                            >
-                              View blocks →
-                            </button>
-                          </td>
+                          <td className="go">{o.blocks} blocks →</td>
                         </tr>
                       ))}
                     </tbody>
@@ -242,7 +256,11 @@ export default function Network() {
                     </thead>
                     <tbody>
                       {rows.map((b) => (
-                        <tr key={b._id}>
+                        <tr
+                          key={b._id}
+                          {...openRow(() => setLevel('schools', { block: b._id }),
+                            `Open the ${b.schools} school(s) in ${b.name}`)}
+                        >
                           <td><strong>{b.name}</strong></td>
                           <td><code>{b.blockId}</code></td>
                           <td className="small muted">{b.dcOffice?.district}</td>
@@ -259,14 +277,7 @@ export default function Network() {
                           <td className="num">
                             {b.pending ? <Badge tone="amber">{b.pending}</Badge> : <span className="muted">—</span>}
                           </td>
-                          <td>
-                            <button
-                              className="btn sm"
-                              onClick={() => setLevel('schools', { block: b._id })}
-                            >
-                              View schools →
-                            </button>
-                          </td>
+                          <td className="go">{b.schools} schools →</td>
                         </tr>
                       ))}
                     </tbody>
@@ -280,16 +291,18 @@ export default function Network() {
                         <th>School</th><th>Code</th><th>Block</th>
                         <th>Head Teacher</th><th>Bank</th>
                         <th className="num">Claims</th><th className="num">Value</th>
-                        <th className="num">Pending</th>
+                        <th className="num">Pending</th><th></th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((s) => (
-                        <tr key={s._id}>
+                        <tr
+                          key={s._id}
+                          {...openRow(() => navigate(`/network/school/${s._id}`),
+                            `Open ${s.name}`)}
+                        >
                           <td>
-                            <Link to={`/network/school/${s._id}`}>
-                              <strong>{s.name}</strong>
-                            </Link>
+                            <strong>{s.name}</strong>
                             <div className="small muted">{s.cluster || s.category}</div>
                           </td>
                           <td><code>{s.code}</code></td>
@@ -310,6 +323,7 @@ export default function Network() {
                           <td className="num">
                             {s.pending ? <Badge tone="amber">{s.pending}</Badge> : <span className="muted">—</span>}
                           </td>
+                          <td className="go">open →</td>
                         </tr>
                       ))}
                     </tbody>

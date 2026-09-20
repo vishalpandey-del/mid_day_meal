@@ -1,11 +1,12 @@
 import mongoose from 'mongoose';
 import Claim from '../models/Claim.js';
 import School from '../models/School.js';
+import User from '../models/User.js';
 import Config from '../models/Config.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import ApiError from '../utils/ApiError.js';
-import { claimScope } from '../utils/scope.js';
-import { dcBudgetStatus, currentFy } from '../services/budgetService.js';
+import { claimScope, safeRegex } from '../utils/scope.js';
+import { dcBudgetStatus, schoolBudgetStatus, currentFy } from '../services/budgetService.js';
 import { CLAIM_STATUS, PAYABLE_STATES, PAYMENT_STATUS, ROLES, SCHOOL_ROLES } from '../config/constants.js';
 
 /** Claims still moving through the chain. */
@@ -380,10 +381,33 @@ export const getSchoolSummary = asyncHandler(async (req, res) => {
     },
   ]);
 
-  const recent = await Claim.find({ school: school._id })
-    .select('claimId category budgetHead amount status paymentStatus billDate submittedAt')
-    .sort({ createdAt: -1 })
-    .limit(10);
+  /*
+   * Opening a school should answer the questions asked of one: what it has
+   * claimed, what is still owed to it, and who signs in for it. The claim
+   * list is paged rather than a fixed ten, because a busy school has dozens
+   * and "recent" hid the rest with no way to reach them.
+   */
+  const perPage = Math.min(Number(req.query.limit) || 25, 100);
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const claimFilter = { school: school._id };
+  if (req.query.status) claimFilter.status = req.query.status;
+  if (req.query.q) {
+    const rx = safeRegex(req.query.q);
+    claimFilter.$or = [{ claimId: rx }, { vendorName: rx }, { billNumber: rx }];
+  }
+
+  const [claims, claimTotal, logins, budget] = await Promise.all([
+    Claim.find(claimFilter)
+      .select('claimId category budgetHead amount status paymentStatus billDate submittedAt vendorName billNumber')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * perPage)
+      .limit(perPage),
+    Claim.countDocuments(claimFilter),
+    User.find({ school: school._id })
+      .select('userId name role designation isActive lastLoginAt mobile')
+      .sort({ role: 1 }),
+    schoolBudgetStatus({ schoolId: school._id }).catch(() => null),
+  ]);
 
   res.json({
     success: true,
@@ -392,6 +416,13 @@ export const getSchoolSummary = asyncHandler(async (req, res) => {
       summary || {
         total: 0, totalAmount: 0, approved: 0, approvedAmount: 0, pending: 0, paidAmount: 0,
       },
-    recent,
+    claims,
+    claimTotal,
+    page,
+    pages: Math.ceil(claimTotal / perPage) || 1,
+    logins,
+    budget,
+    // Kept so an older client that still reads `recent` does not break.
+    recent: claims,
   });
 });

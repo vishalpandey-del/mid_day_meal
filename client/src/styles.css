@@ -725,3 +725,33 @@ details[open] > summary::before { content: '▾ '; }
   .signin-brand { display: none; }
   .signin-panel { min-height: 100vh; }
 }
+
+/* ---- Rows that open something ----
+   A whole row is the target, not just the link inside it, so anywhere in a
+   block or school line drills in. The chevron marks the row as openable. */
+tr.row-open { cursor: pointer; }
+tr.row-open:hover { background: var(--sky-g); }
+tr.row-open:focus-visible {
+  outline: 2px solid var(--sky);
+  outline-offset: -2px;
+}
+tr.row-open .go {
+  color: var(--txt-l);
+  font-weight: 700;
+  text-align: right;
+  white-space: nowrap;
+}
+tr.row-open:hover .go { color: var(--sky-d); }
+
+/* ---- School record: the facts beside the bills ----
+   The bill list is the taller half on a busy school, so it takes the wider
+   column. Below 1100px the two stack, facts first. */
+.school-split {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(0, 1.5fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .school-split { grid-template-columns: 1fr; }
+}

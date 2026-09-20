@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -14,6 +14,7 @@ const SLICE = ['#1a73e8', '#0f9d58', '#f4a100', '#7b3fa8', '#d93025', '#00838f',
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [network, setNetwork] = useState(null);
   const [error, setError] = useState('');
@@ -23,6 +24,29 @@ export default function Dashboard() {
       .then(({ data }) => setData(data))
       .catch((e) => setError(errorText(e)));
   }, []);
+
+  /*
+   * A row on the rollup opens what it names: a school goes to its profile, a
+   * block or district opens the level beneath it on the network screen.
+   */
+  const openNetworkRow = (r) => {
+    const to = network?.level === 'schools'
+      ? `/network/school/${r._id}`
+      : network?.level === 'blocks'
+        ? `/network?level=schools&block=${r._id}`
+        : `/network?level=blocks&district=${r._id}`;
+    const go = () => navigate(to);
+    return {
+      className: 'row-open',
+      onClick: go,
+      role: 'button',
+      tabIndex: 0,
+      title: `Open ${r.name || r.district}`,
+      onKeyDown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+      },
+    };
+  };
 
   // Roles with something under them also get a network rollup on the landing
   // screen, so the hierarchy is visible without opening another page.
@@ -119,12 +143,10 @@ export default function Dashboard() {
               </thead>
               <tbody>
                 {network.rows.slice(0, 8).map((r) => (
-                  <tr key={r._id}>
+                  <tr key={r._id} {...openNetworkRow(r)}>
                     {network.level === 'schools' ? (
                       <>
-                        <td>
-                          <Link to={`/network/school/${r._id}`}><strong>{r.name}</strong></Link>
-                        </td>
+                        <td><strong>{r.name}</strong></td>
                         <td><code>{r.code}</code></td>
                         <td className="small">{r.headTeacher || '—'}</td>
                         <td className="num">{r.claims ?? 0}</td>

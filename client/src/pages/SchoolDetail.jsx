@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import api, { errorText } from '../api/client.js';
-import { Alert, Badge, Card, Empty, PageHead, Spinner, Tile } from '../components/UI.jsx';
-import { dateOf, inr } from '../utils/format.js';
+import { Alert, Badge, Card, Empty, PageHead, SearchBox, Spinner, Tile } from '../components/UI.jsx';
+import { dateOf, inr, ROLE_LABEL } from '../utils/format.js';
+import useDebounced from '../utils/useDebounced.js';
 
 const Row = ({ label, children }) => (
   <div
@@ -22,12 +23,20 @@ export default function SchoolDetail() {
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  const [q, setQ] = useState('');
+  const [page, setPage] = useState(1);
+  const query = useDebounced(q);
 
-  useEffect(() => {
-    api.get(`/dashboard/school/${id}`)
+  // A new search starts at the first page, or page 3 of the old result shows.
+  useEffect(() => { setPage(1); }, [query]);
+
+  const load = useCallback(() => {
+    api.get(`/dashboard/school/${id}`, { params: { page, limit: 25, ...(query ? { q: query } : {}) } })
       .then(({ data }) => setData(data))
       .catch((e) => setError(errorText(e)));
-  }, [id]);
+  }, [id, page, query]);
+
+  useEffect(load, [load]);
 
   if (error) return <Alert kind="error">{error}</Alert>;
   if (!data) return <Spinner />;
@@ -35,6 +44,22 @@ export default function SchoolDetail() {
   const s = data.school;
   const sum = data.summary;
   const payable = Boolean(s.bank?.accountNumber && s.bank?.ifsc);
+  const claims = data.claims || data.recent || [];
+
+  /* The whole row opens the bill, keyboard included. */
+  const openRow = (c) => {
+    const go = () => navigate(`/claims/${c._id}`);
+    return {
+      className: 'row-open',
+      onClick: go,
+      role: 'button',
+      tabIndex: 0,
+      title: `Open ${c.claimId}`,
+      onKeyDown: (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); }
+      },
+    };
+  };
 
   return (
     <>
@@ -56,7 +81,7 @@ export default function SchoolDetail() {
         <Tile label="Paid Out" value={inr(sum.paidAmount)} tone="purple" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 18, alignItems: 'start' }}>
+      <div className="school-split">
         <div>
           <Card title="School Profile">
             <Row label="School Code"><code>{s.code}</code></Row>
@@ -83,6 +108,37 @@ export default function SchoolDetail() {
             </Row>
           </Card>
 
+          {data.logins?.length > 0 && (
+            <Card title={`Logins (${data.logins.length})`} padded={false}>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>User ID</th><th>Role</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {data.logins.map((u) => (
+                      <tr key={u._id}>
+                        <td>
+                          <code>{u.userId}</code>
+                          <div className="small muted">{u.name}</div>
+                        </td>
+                        <td className="small">{ROLE_LABEL[u.role] || u.role}</td>
+                        <td>
+                          <Badge tone={u.isActive ? 'green' : 'red'}>
+                            {u.isActive ? 'Active' : 'Disabled'}
+                          </Badge>
+                          <div className="small muted">
+                            {u.lastLoginAt ? dateOf(u.lastLoginAt) : 'Never signed in'}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
           <Card title="Bank Details">
             <Row label="Bank">{s.bank?.bankName || '—'}</Row>
             <Row label="Account">
@@ -98,41 +154,57 @@ export default function SchoolDetail() {
           </Card>
         </div>
 
-        <Card title={`Recent Claims (${data.recent.length})`} padded={false}>
-          {data.recent.length === 0 ? (
-            <Empty>This school has not raised any bills yet.</Empty>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Claim ID</th><th>Scheme</th>
-                    <th className="num">Amount</th><th>Status</th>
-                    <th>Payment</th><th>Bill Date</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.recent.map((c) => (
-                    <tr key={c._id}>
-                      <td>
-                        <Link to={`/claims/${c._id}`}><strong>{c.claimId}</strong></Link>
-                      </td>
-                      <td className="small">{c.category}</td>
-                      <td className="num">{inr(c.amount)}</td>
-                      <td><Badge>{c.status}</Badge></td>
-                      <td>
-                        {c.status === 'Approved'
-                          ? <Badge>{c.paymentStatus}</Badge>
-                          : <span className="muted">—</span>}
-                      </td>
-                      <td className="small">{dateOf(c.billDate)}</td>
+        <div>
+          <Card>
+            <SearchBox value={q} onSearch={setQ} placeholder="Search this school's bills…" />
+          </Card>
+
+          <Card
+            title={`Bills · ${data.claimTotal ?? claims.length}`}
+            padded={false}
+            actions={data.pages > 1 ? (
+              <div className="row">
+                <button className="btn sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Prev</button>
+                <span className="small muted">{data.page} / {data.pages}</span>
+                <button className="btn sm" disabled={page >= data.pages} onClick={() => setPage((p) => p + 1)}>Next</button>
+              </div>
+            ) : null}
+          >
+            {claims.length === 0 ? (
+              <Empty>{q ? 'No bill here matches that.' : 'This school has not raised any bills yet.'}</Empty>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Claim ID</th><th>Scheme</th><th>Vendor</th>
+                      <th className="num">Amount</th><th>Status</th>
+                      <th>Payment</th><th>Bill Date</th><th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
+                  </thead>
+                  <tbody>
+                    {claims.map((c) => (
+                      <tr key={c._id} {...openRow(c)}>
+                        <td><strong>{c.claimId}</strong></td>
+                        <td className="small">{c.category}</td>
+                        <td className="small">{c.vendorName || '—'}</td>
+                        <td className="num">{inr(c.amount)}</td>
+                        <td><Badge>{c.status}</Badge></td>
+                        <td>
+                          {c.status === 'Approved'
+                            ? <Badge>{c.paymentStatus}</Badge>
+                            : <span className="muted">—</span>}
+                        </td>
+                        <td className="small">{dateOf(c.billDate)}</td>
+                        <td className="go">open →</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
       </div>
     </>
   );
