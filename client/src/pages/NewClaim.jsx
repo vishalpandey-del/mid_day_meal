@@ -27,7 +27,11 @@ export default function NewClaim() {
   // Vercel measures the whole request, so three small pages can be refused
   // together even though each one passes. The total is checked as well.
   const [maxTotalMb, setMaxTotalMb] = useState(4);
+  // What the school has left for the chosen scheme. Asked as soon as a scheme
+  // is picked, so the ceiling is visible before an amount is typed rather than
+  // arriving as a refusal once the whole form is filled in.
   const [budget, setBudget] = useState(null);
+  const [checking, setChecking] = useState(false);
   // A returned bill is corrected and sent back in one step, so the form needs
   // to know it is looking at one.
   const [claimStatus, setClaimStatus] = useState('');
@@ -62,7 +66,37 @@ export default function NewClaim() {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
+  /* Ask the server where the school stands whenever the scheme changes. */
+  useEffect(() => {
+    if (!form.category) { setBudget(null); return; }
+    const head = categories.find((c) => c.name === form.category)?.budgetHead;
+    if (!head) return;
+    setChecking(true);
+    api.get('/budget/headroom', {
+      params: {
+        budgetHead: head,
+        billDate: form.billDate || undefined,
+        ...(editId ? { excludeClaimId: editId } : {}),
+      },
+    })
+      .then(({ data }) => setBudget(data.budget))
+      .catch(() => setBudget(null))
+      .finally(() => setChecking(false));
+  }, [form.category, form.billDate, categories, editId]);
+
   const chosen = categories.find((c) => c.name === form.category);
+
+  /*
+   * A school cannot raise a bill it has no room for, so the form refuses it
+   * rather than letting the server do it after everything is typed. `spent`
+   * counts bills still working their way up the chain as well as approved
+   * ones — they are already holding their share of the allocation.
+   */
+  const noAllocation = budget?.level === 'blocked' && budget.reason === 'no-allocation';
+  const left = budget?.available ?? 0;
+  const wanted = Number(form.amount) || 0;
+  const overBudget = Boolean(budget) && !noAllocation && wanted > left;
+  const blocked = noAllocation || overBudget;
 
   /* Editing something the maker still holds: saving can also send it on. */
   const sendable = Boolean(editId) && ['Returned', 'Draft'].includes(claimStatus);
@@ -104,7 +138,19 @@ export default function NewClaim() {
       />
 
       <Alert kind="error">{error}</Alert>
-      {budget && <Alert kind="warn">{budget.message} — the bill was still saved.</Alert>}
+      {noAllocation && (
+        <Alert kind="error">
+          <strong>You cannot raise this bill.</strong> {budget.message}
+        </Alert>
+      )}
+      {overBudget && (
+        <Alert kind="error">
+          <strong>You cannot raise this bill.</strong> {chosen?.name} has{' '}
+          <strong>{inr(left)}</strong> left for {budget.financialYear} and this bill is{' '}
+          <strong>{inr(wanted)}</strong> — {inr(wanted - left)} more than remains.
+          Reduce the amount, or ask your district office to allocate more.
+        </Alert>
+      )}
       {claimStatus === 'Returned' && returnReason && (
         <Alert kind="warn">
           Sent back by the checker: {returnReason} — correct it below and send it back.
@@ -150,6 +196,25 @@ export default function NewClaim() {
               {categories.map((c) => <option key={c._id} value={c.name}>{c.name}</option>)}
             </select>
           </Field>
+
+          {form.category && (
+            <div className="budget-strip">
+              {checking ? (
+                <span className="muted small">Checking what is left…</span>
+              ) : noAllocation ? (
+                <span className="budget-none">No budget allocated for this scheme</span>
+              ) : budget ? (
+                <>
+                  <span><b>{inr(budget.allocated)}</b> allocated</span>
+                  <span><b>{inr(budget.committed)}</b> already committed</span>
+                  <span className={left > 0 ? 'budget-left' : 'budget-none'}>
+                    <b>{inr(left)}</b> left to spend
+                  </span>
+                  <span className="muted small">{budget.financialYear}</span>
+                </>
+              ) : null}
+            </div>
+          )}
         </fieldset>
 
         <fieldset>
@@ -163,10 +228,17 @@ export default function NewClaim() {
             </Field>
             <Field
               label="Amount (₹) *"
-              hint={chosen?.maxAmount && Number(form.amount) > chosen.maxAmount
-                ? `Above the ${inr(chosen.maxAmount)} ceiling` : ''}
+              hint={
+                overBudget ? `${inr(wanted - left)} more than your school has left`
+                : chosen?.maxAmount && wanted > chosen.maxAmount ? `Above the ${inr(chosen.maxAmount)} ceiling`
+                : budget && !noAllocation ? `Up to ${inr(left)} for this scheme`
+                : ''
+              }
             >
-              <input type="number" min="1" value={form.amount} onChange={set('amount')} required />
+              <input
+                type="number" min="1" value={form.amount} onChange={set('amount')} required
+                className={overBudget ? 'over' : ''}
+              />
             </Field>
           </div>
           <Field label="Description">
@@ -220,7 +292,9 @@ export default function NewClaim() {
         </fieldset>
 
         <div className="row">
-          <button type="submit" className="btn primary" disabled={busy}>
+          {/* Nothing can be saved over the allocation — not even a draft, which
+              would only move the refusal to the moment it is sent. */}
+          <button type="submit" className="btn primary" disabled={busy || blocked}>
             {busy
               ? 'Saving…'
               : !editId
@@ -230,12 +304,12 @@ export default function NewClaim() {
                   : 'Save Changes'}
           </button>
           {editId && sendable && (
-            <button type="button" className="btn" disabled={busy} onClick={() => send('save')}>
+            <button type="button" className="btn" disabled={busy || blocked} onClick={() => send('save')}>
               Save Without Sending
             </button>
           )}
           {!editId && (
-            <button type="button" className="btn" disabled={busy} onClick={() => send('draft')}>
+            <button type="button" className="btn" disabled={busy || blocked} onClick={() => send('draft')}>
               Save as Draft
             </button>
           )}

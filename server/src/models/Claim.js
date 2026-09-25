@@ -113,6 +113,17 @@ const claimSchema = new mongoose.Schema(
     // Beneficiary-export trail. Once exported, any later status change needs a remark.
     exportHistory: { type: [exportMarkSchema], default: [] },
     lastExportedAt: { type: Date, default: null, index: true },
+
+    /*
+     * Whether this bill still belongs in a beneficiary file.
+     *
+     * A bill goes in once. Downloading it again would ask PFMS to pay the same
+     * vendor twice, and the second file gives no sign that it is a repeat. So
+     * the export clears this flag, and only a real change sets it again: the
+     * bill itself being edited, or its payment being undone — a payment marked
+     * back to Unpaid, or one that bounced and must go out afresh.
+     */
+    exportDue: { type: Boolean, default: true, index: true },
     postExportRemarks: { type: String, default: '' },
 
     // Total days the SLA clock was paused while the claim sat Under Query.

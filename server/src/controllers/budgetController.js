@@ -9,9 +9,10 @@ import {
   schoolBudgetStatus,
   schoolBudgetLedger,
   dcBudgetStatus,
+  checkBudgetFor,
   currentFy,
 } from '../services/budgetService.js';
-import { AUDIT_ACTIONS, ROLES } from '../config/constants.js';
+import { AUDIT_ACTIONS, ROLES, SCHOOL_ROLES } from '../config/constants.js';
 import { inr } from '../utils/format.js';
 
 /**
@@ -303,4 +304,35 @@ export const getSchoolLedger = asyncHandler(async (req, res) => {
   });
 
   res.json({ success: true, school: schoolId, ...ledger });
+});
+
+/**
+ * GET /api/budget/headroom — what a school has left for one scheme.
+ *
+ * The bill form asks this as the scheme is chosen, so the maker sees the
+ * ceiling before typing an amount rather than being refused after filling the
+ * whole form in. A school may only ask about itself.
+ */
+export const getHeadroom = asyncHandler(async (req, res) => {
+  const { budgetHead, schoolId, amount, billDate } = req.query;
+  if (!budgetHead) throw ApiError.badRequest('Name the budget head to check.');
+
+  const target = SCHOOL_ROLES.includes(req.user.role)
+    ? req.user.school?._id || req.user.school
+    : schoolId;
+  if (!target) throw ApiError.badRequest('Name the school to check.');
+
+  if (SCHOOL_ROLES.includes(req.user.role) && String(target) !== String(req.user.school?._id || req.user.school)) {
+    throw ApiError.forbidden('You can only check your own school.');
+  }
+
+  const position = await checkBudgetFor({
+    schoolId: target,
+    budgetHead,
+    amount: Number(amount) || 0,
+    billDate: billDate || undefined,
+    excludeClaimId: req.query.excludeClaimId || undefined,
+  });
+
+  res.json({ success: true, budget: position });
 });

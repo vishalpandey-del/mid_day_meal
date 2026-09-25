@@ -328,7 +328,49 @@ export const getMyQueue = asyncHandler(async (req, res) => {
     return o;
   });
 
-  res.json({ success: true, stage: statuses, count: withAge.length, claims: withAge });
+  /*
+   * The same claims, gathered into batches — one per school and scheme.
+   *
+   * A school usually sends several bills against the same scheme in a month,
+   * and the district decides them together: same head teacher, same budget
+   * head, same question. Deciding them one screen at a time is the same work
+   * done ten times. Grouping here rather than on the client keeps the two
+   * views showing the same set, and a batch of one is still listed so nothing
+   * hides from the count.
+   */
+  const batches = [...withAge.reduce((map, c) => {
+    const schoolId = String(c.school?._id || c.school);
+    const key = `${schoolId}::${c.category}`;
+    const batch = map.get(key) || {
+      key,
+      school: c.school,
+      category: c.category,
+      budgetHead: c.budgetHead,
+      claims: [],
+      total: 0,
+      oldestDays: 0,
+      breached: 0,
+    };
+    batch.claims.push(c);
+    batch.total += c.amount;
+    batch.oldestDays = Math.max(batch.oldestDays, c.ageDays || 0);
+    if (c.slaBucket === 'breached') batch.breached += 1;
+    map.set(key, batch);
+    return map;
+  }, new Map()).values()]
+    // The district works oldest-first, and a bigger group is worth more of
+    // one sitting than a single bill of the same age.
+    .sort((a, b) => b.oldestDays - a.oldestDays || b.claims.length - a.claims.length)
+    .map((b) => ({ ...b, count: b.claims.length }));
+
+  res.json({
+    success: true,
+    stage: statuses,
+    count: withAge.length,
+    claims: withAge,
+    batches,
+    batchCount: batches.length,
+  });
 });
 
 /**

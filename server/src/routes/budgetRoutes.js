@@ -5,6 +5,7 @@ import {
   listBudgets,
   getSchoolBudget,
   getSchoolLedger,
+  getHeadroom,
   getDcBudget,
   deleteBudget,
 } from '../controllers/budgetController.js';
@@ -20,6 +21,9 @@ const state = authorize(ROLES.STATE, ROLES.ADMIN);
 const dcOrAbove = authorize(ROLES.DC, ROLES.STATE, ROLES.ADMIN);
 
 router.get('/', listBudgets);
+
+/* What a school has left for one scheme — the bill form asks before it submits. */
+router.get('/headroom', getHeadroom);
 
 // State allocates down to a DC office; the DC then allocates to its schools.
 router.post('/dc', state, validate(dcBudgetSchema), allocateToDc);

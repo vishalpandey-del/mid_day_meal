@@ -127,12 +127,30 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
     filter.paymentStatus = { $in: PAYABLE_STATES };
   }
 
+  /*
+   * One bill, one file. A bill already downloaded is left out, so a second
+   * download cannot ask PFMS to pay the same vendor twice. It comes back only
+   * when something changes: the bill is edited, or its payment is undone.
+   * `includeExported=true` overrides this for a DC who needs the full list
+   * again — to re-upload a file lost before it reached PFMS, say.
+   */
+  const scheme = req.query.category;
+  if (scheme) filter.category = scheme;
+
+  const redownload = req.query.includeExported === 'true';
+  if (!redownload) filter.exportDue = { $ne: false };
+
   const claims = await fetchClaims(filter);
   if (!claims.length) {
+    const where = [
+      tab ? `"${tab}"` : null,
+      scheme ? `under ${scheme}` : null,
+    ].filter(Boolean).join(' ');
     throw ApiError.badRequest(
-      tab
-        ? `No approved claims are sitting in "${tab}", so there is nothing to export.`
-        : 'No approved claims match this filter, so there is nothing to export.'
+      redownload
+        ? `No approved claims match this filter${where ? ` (${where})` : ''}, so there is nothing to export.`
+        : `Nothing new to export${where ? ` in ${where}` : ''}. Every approved bill here has already been ` +
+          'downloaded. A bill comes back when it is edited, or when its payment is undone.'
     );
   }
 
@@ -147,7 +165,8 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
     );
   }
 
-  const slug = tab ? `-${tab.toLowerCase().replace(/\s+/g, '-')}` : '';
+  const slugify = (v) => v.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const slug = [tab, scheme].filter(Boolean).map(slugify).map((x) => `-${x}`).join('');
   const fileName = `pfms-beneficiary${slug}-${todayStamp()}.xlsx`;
   const wb = buildBeneficiaryWorkbook(claims);
 
@@ -157,7 +176,9 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
   await Claim.updateMany(
     { _id: { $in: claims.map((c) => c._id) } },
     {
-      $set: { lastExportedAt: now },
+      // Written as one update with the stamp: the bill is in the file now, so
+      // it stops being due in the same breath.
+      $set: { lastExportedAt: now, exportDue: false },
       $push: {
         exportHistory: {
           exportedAt: now,
@@ -174,7 +195,8 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
     req,
     action: AUDIT_ACTIONS.EXPORT,
     detail:
-      `PFMS beneficiary file${tab ? ` (${tab})` : ''} — ${claims.length} approved claim(s) · ` +
+      `PFMS beneficiary file${tab ? ` (${tab})` : ''}${scheme ? ` · ${scheme}` : ''}` +
+      ` — ${claims.length} approved claim(s) · ` +
       `${claims.map((c) => c.claimId).join(', ').slice(0, 500)}`,
   });
 

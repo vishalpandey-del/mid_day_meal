@@ -23,6 +23,11 @@ export default function Payments() {
   const [tab, setTab] = useState('Unpaid');
   const [q, setQ] = useState('');
   const query = useDebounced(q);
+  // The PFMS file can be narrowed to one scheme, because a treasury upload is
+  // usually made against one budget head at a time.
+  const [scheme, setScheme] = useState('');
+  const [schemes, setSchemes] = useState([]);
+  const [redownload, setRedownload] = useState(false);
   const [res, setRes] = useState(null);
   const [counts, setCounts] = useState({});
   const [error, setError] = useState('');
@@ -32,6 +37,12 @@ export default function Payments() {
   // Reversal needs a written reason, so it goes through a confirm step.
   const [reversing, setReversing] = useState(null);
   const [reason, setReason] = useState('');
+
+  useEffect(() => {
+    api.get('/master/categories')
+      .then(({ data }) => setSchemes(data.categories || []))
+      .catch(() => {});
+  }, []);
 
   const load = useCallback(() => {
     setRes(null);
@@ -89,9 +100,17 @@ export default function Payments() {
         <button
           className="btn primary sm"
           onClick={() =>
-            /* The file follows the tab, so each one exports what it shows. */
-            downloadFile('/reports/beneficiary.xlsx', { paymentStatus: tab })
-              .then((n) => setNote(`Downloaded ${n} — the ${active.label.toLowerCase()} bills.`))
+            /* The file follows the tab and the chosen scheme, and by default
+               leaves out bills that have already been downloaded. */
+            downloadFile('/reports/beneficiary.xlsx', {
+              paymentStatus: tab,
+              ...(scheme ? { category: scheme } : {}),
+              ...(redownload ? { includeExported: 'true' } : {}),
+            })
+              .then((n) => setNote(
+                `Downloaded ${n} — ${scheme || 'all schemes'}, ${active.label.toLowerCase()}` +
+                (redownload ? ', including bills already exported.' : '.')
+              ))
               .then(load)
               .catch((e) => setError(errorText(e)))
           }
@@ -134,7 +153,27 @@ export default function Payments() {
           value={q}
           onSearch={setQ}
           placeholder="Search bill number, vendor or school…"
-        />
+        >
+          <select value={scheme} onChange={(e) => setScheme(e.target.value)}>
+            <option value="">All schemes</option>
+            {schemes.map((c) => <option key={c._id} value={c.name}>{c.name}</option>)}
+          </select>
+        </SearchBox>
+
+        <label className="redownload">
+          <input
+            type="checkbox"
+            checked={redownload}
+            onChange={(e) => setRedownload(e.target.checked)}
+          />
+          <span>
+            Include bills already downloaded
+            <em>
+              Off by default: a bill goes into one file, so PFMS is never asked to
+              pay the same vendor twice. Tick this only to rebuild a file that was lost.
+            </em>
+          </span>
+        </label>
       </Card>
 
       <div className="pill-tabs">

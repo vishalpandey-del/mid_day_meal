@@ -44,7 +44,7 @@ export const fyRange = (label) => {
  * Allocated vs consumed for one school, in one FY, optionally for one head.
  * `committed` counts claims still in flight; `approved` counts only approved.
  */
-export const schoolBudgetStatus = async ({ schoolId, financialYear, budgetHead }) => {
+export const schoolBudgetStatus = async ({ schoolId, financialYear, budgetHead, excludeClaimId }) => {
   const fy = financialYear || currentFy();
   schoolId = oid(schoolId);
   const { from, to } = fyRange(fy);
@@ -58,6 +58,9 @@ export const schoolBudgetStatus = async ({ schoolId, financialYear, budgetHead }
     status: { $in: CONSUMING_STATUSES },
   };
   if (budgetHead) claimFilter.budgetHead = budgetHead;
+  // Editing a bill must not measure it against itself: its own amount is
+  // already committed, so counting it twice would refuse every edit.
+  if (excludeClaimId) claimFilter._id = { $ne: oid(excludeClaimId) };
 
   const [budgets, spend] = await Promise.all([
     Budget.find(budgetFilter).lean(),
@@ -109,27 +112,36 @@ export const schoolBudgetStatus = async ({ schoolId, financialYear, budgetHead }
 };
 
 /**
- * Checks a proposed claim against the school's remaining allocation.
- * Warn-only by default: returns a warning rather than throwing.
+ * Measures a proposed claim against the school's remaining allocation.
+ *
+ * Returns the position; it never throws. `assertWithinBudget` is what turns a
+ * shortfall into a refusal, so a screen can ask "would this fit?" without
+ * committing to anything.
  */
-export const checkBudgetFor = async ({ schoolId, budgetHead, amount, billDate }) => {
+export const checkBudgetFor = async ({ schoolId, budgetHead, amount, billDate, excludeClaimId }) => {
   schoolId = oid(schoolId);
-  const cfg = await Config.getGlobal();
-  if (!cfg.budget?.warnOnOverspend && !cfg.budget?.blockOnOverspend) return null;
 
   const fy = Budget.fyLabel(billDate || new Date());
-  const { rows } = await schoolBudgetStatus({ schoolId, financialYear: fy, budgetHead });
+  const { rows } = await schoolBudgetStatus({ schoolId, financialYear: fy, budgetHead, excludeClaimId });
   const row = rows.find((r) => r.budgetHead === budgetHead);
 
-  // No allocation on record — nothing to measure against.
+  /*
+   * Nothing allocated. A school cannot spend what was never given to it, so
+   * this is a refusal rather than a note — otherwise the first bill of the
+   * year would sail through against a budget of zero.
+   */
   if (!row || !row.allocated) {
     return {
-      level: 'info',
+      level: 'blocked',
+      reason: 'no-allocation',
       budgetHead,
       financialYear: fy,
       allocated: 0,
       available: 0,
-      message: `No ${fy} allocation is on record for ${budgetHead}. This claim is not counted against any budget.`,
+      requested: Number(amount || 0),
+      message:
+        `No ${fy} budget has been allocated to your school for ${budgetHead}. ` +
+        'Ask your district office to allocate it before raising this bill.',
     };
   }
 
@@ -140,22 +152,48 @@ export const checkBudgetFor = async ({ schoolId, budgetHead, amount, billDate })
       budgetHead,
       financialYear: fy,
       allocated: row.allocated,
+      // `committed` travels with the rest: a screen showing the position needs
+      // all three, and leaving it out here made it read as nothing spent.
+      committed: row.committed,
       available: row.available,
+      requested: Number(amount || 0),
       availableAfter,
     };
   }
 
+  const inr = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`;
   return {
-    level: 'warning',
+    level: 'blocked',
+    reason: 'over-budget',
     budgetHead,
     financialYear: fy,
     allocated: row.allocated,
     available: row.available,
+    committed: row.committed,
+    requested: Number(amount || 0),
     overBy: Math.abs(availableAfter),
-    message: `This claim exceeds the remaining ${budgetHead} allocation for ${fy} by ₹${Math.abs(
-      availableAfter
-    ).toLocaleString('en-IN')}.`,
+    message:
+      `This bill is ${inr(Math.abs(availableAfter))} more than your school has left. ` +
+      `${budgetHead} for ${fy}: ${inr(row.allocated)} allocated, ${inr(row.committed)} already committed, ` +
+      `${inr(row.available)} remaining — and this bill is ${inr(amount)}.`,
   };
+};
+
+/**
+ * The same check, as a gate. Raising a bill a school cannot pay for is not a
+ * warning to be clicked past: it commits money that was never granted, and the
+ * shortfall only surfaces at the district once the paperwork is already made.
+ */
+export const assertWithinBudget = async (args) => {
+  const position = await checkBudgetFor(args);
+  if (position?.level === 'blocked') {
+    const err = new Error(position.message);
+    err.statusCode = 400;
+    err.details = [{ field: 'amount', message: position.message }];
+    err.budget = position;
+    throw err;
+  }
+  return position;
 };
 
 /** Allocated vs consumed for one DC office, aggregated over its schools. */

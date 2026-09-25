@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { Alert, Badge, Card, Confirm, Empty, SearchBox, Spinner } from '../components/UI.jsx';
 import { dateOf, inr } from '../utils/format.js';
 import useOpenRow from '../utils/useOpenRow.js';
+import BatchReview from './BatchReview.jsx';
 
 /**
  * The signed-in user's own action queue. For the DC this doubles as the
@@ -18,6 +19,14 @@ export default function MyQueue() {
   const isDc = user?.role === 'dc';
 
   const [claims, setClaims] = useState(null);
+  /*
+   * The same queue, gathered into one group per school and scheme. A district
+   * usually decides a school's month of bills together, so this is the view it
+   * works from; the flat list stays for finding one bill among many.
+   */
+  const [batches, setBatches] = useState([]);
+  const [view, setView] = useState('batches');
+  const [reviewing, setReviewing] = useState(null);
   const [error, setError] = useState('');
   const [note, setNote] = useState('');
   const [picked, setPicked] = useState(new Set());
@@ -28,7 +37,11 @@ export default function MyQueue() {
   const load = useCallback(() => {
     setClaims(null);
     api.get('/dashboard/queue')
-      .then(({ data }) => { setClaims(data.claims); setPicked(new Set()); })
+      .then(({ data }) => {
+        setClaims(data.claims);
+        setBatches(data.batches || []);
+        setPicked(new Set());
+      })
       .catch((e) => setError(errorText(e)));
   }, []);
 
@@ -57,19 +70,18 @@ export default function MyQueue() {
     });
   }, [q, claims]);
 
-  const bulkApprove = async () => {
+  /* One approval path, whether the bills were ticked in the list or in a batch. */
+  const approveMany = async (ids, note) => {
     setBusy(true);
     setError('');
     try {
-      const { data } = await api.post('/claims/bulk-approve', {
-        claimIds: [...picked],
-        remarks,
-      });
+      const { data } = await api.post('/claims/bulk-approve', { claimIds: ids, remarks: note });
       setNote(
         `${data.approvedCount} bill(s) approved · ${inr(data.totalAmount)}` +
         (data.failedCount ? ` · ${data.failedCount} could not be approved` : '')
       );
       setConfirming(false);
+      setReviewing(null);
       setRemarks('');
       load();
     } catch (e) {
@@ -78,6 +90,10 @@ export default function MyQueue() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const bulkApprove = async () => {
+    await approveMany([...picked], remarks);
   };
 
   if (error && !claims) return <Alert kind="error">{error}</Alert>;
@@ -98,6 +114,17 @@ export default function MyQueue() {
    * must mean the rows being looked at — approving something filtered out of
    * sight is exactly the mistake this screen cannot afford.
    */
+  /* The same search narrows the batches, keeping only matching bills in each. */
+  const shownBatches = (!needle ? batches : batches
+    .map((b) => {
+      const claims = b.claims.filter((c) => [c.claimId, c.vendorName, c.billNumber, c.school?.name, c.category]
+        .some((v) => String(v || '').toLowerCase().includes(needle)));
+      return claims.length
+        ? { ...b, claims, count: claims.length, total: claims.reduce((s, c) => s + c.amount, 0) }
+        : null;
+    })
+    .filter(Boolean));
+
   const shownIds = shown.map((c) => c._id);
   const allPicked = shown.length > 0 && shownIds.every((id) => picked.has(id));
   const toggleAll = () => setPicked(allPicked ? new Set() : new Set(shownIds));
@@ -118,6 +145,55 @@ export default function MyQueue() {
         />
       </Card>
 
+      {isDc && batches.length > 0 && (
+        <div className="pill-tabs">
+          <button className={view === 'batches' ? 'on' : ''} onClick={() => setView('batches')}>
+            Batch Bills ({shownBatches.length})
+          </button>
+          <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>
+            All Bills ({shown.length})
+          </button>
+        </div>
+      )}
+
+      {isDc && view === 'batches' && (
+        shownBatches.length === 0 ? (
+          <Card><Empty>{needle ? 'No batch matches that.' : 'Nothing is waiting for you right now.'}</Empty></Card>
+        ) : (
+          <div className="batch-grid">
+            {shownBatches.map((b) => (
+              <Card key={b.key}>
+                <div className="batch-card">
+                  <div className="batch-card-head">
+                    <div>
+                      <strong>{b.school?.name}</strong>
+                      <div className="small muted">{b.category} · {b.budgetHead}</div>
+                    </div>
+                    {b.breached > 0 && <Badge tone="red">{b.breached} past SLA</Badge>}
+                  </div>
+
+                  <div className="batch-card-nums">
+                    <div><span>{b.count}</span>bill(s)</div>
+                    <div><span>{inr(b.total)}</span>together</div>
+                    <div><span>{b.oldestDays}d</span>oldest</div>
+                  </div>
+
+                  <div className="batch-card-ids small muted">
+                    {b.claims.slice(0, 4).map((c) => c.claimId).join(' · ')}
+                    {b.count > 4 && ` · +${b.count - 4} more`}
+                  </div>
+
+                  <button className="btn primary sm" onClick={() => setReviewing(b)}>
+                    Review &amp; Approve →
+                  </button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )
+      )}
+
+      {(!isDc || view === 'list') && (
       <Card
         title={`My Queue · ${shown.length} claim(s)${needle && shown.length !== claims.length ? ` of ${claims.length}` : ''}`}
         actions={
@@ -195,6 +271,16 @@ export default function MyQueue() {
           </div>
         )}
       </Card>
+      )}
+
+      {reviewing && (
+        <BatchReview
+          batch={reviewing}
+          busy={busy}
+          onApprove={approveMany}
+          onClose={() => setReviewing(null)}
+        />
+      )}
 
       <Confirm
         open={confirming}

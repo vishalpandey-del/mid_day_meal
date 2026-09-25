@@ -8,7 +8,7 @@ import asyncHandler from '../utils/asyncHandler.js';
 import { claimScope, assertCanView, safeRegex, toObjectId } from '../utils/scope.js';
 import { generateClaimId } from '../services/claimIdService.js';
 import { logAudit } from '../services/auditService.js';
-import { checkBudgetFor } from '../services/budgetService.js';
+import { checkBudgetFor, assertWithinBudget } from '../services/budgetService.js';
 import {
   notify,
   recipientsForSchool,
@@ -155,6 +155,20 @@ export const createClaim = asyncHandler(async (req, res) => {
 
   const isDraft = saveAsDraft === true || saveAsDraft === 'true';
 
+  /*
+   * The budget is checked before anything is written. A school cannot raise a
+   * bill it has no allocation for, and cannot raise one that would take it
+   * past what is left — including bills still working their way up the chain,
+   * which are already holding their share. A draft is checked too: sending it
+   * later would only move the refusal to a worse moment.
+   */
+  const budget = await assertWithinBudget({
+    schoolId: school._id,
+    budgetHead: cat.budgetHead,
+    amount: rest.amount,
+    billDate: rest.billDate,
+  });
+
   const claim = new Claim({
     ...rest,
     category,
@@ -193,14 +207,6 @@ export const createClaim = asyncHandler(async (req, res) => {
     });
   }
 
-  // Budget is advisory: surface the shortfall, never block the claim.
-  const budget = await checkBudgetFor({
-    schoolId: school._id,
-    budgetHead: claim.budgetHead,
-    amount: claim.amount,
-    billDate: claim.billDate,
-  });
-
   res.status(201).json({ success: true, claim, budget });
 });
 
@@ -226,11 +232,29 @@ export const updateClaim = asyncHandler(async (req, res) => {
   }
   Object.assign(claim, rest);
 
+  /*
+   * Re-check after the edit: raising the amount, or moving the bill to a
+   * scheme with less left in it, must be refused the same as raising it that
+   * way in the first place. The claim excludes itself, since its old amount
+   * is already counted as committed.
+   */
+  await assertWithinBudget({
+    schoolId: claim.school,
+    budgetHead: claim.budgetHead,
+    amount: claim.amount,
+    billDate: claim.billDate,
+    excludeClaimId: claim._id,
+  });
+
   if (req.files?.length) {
     claim.attachments.push(
       ...(await persistFiles(req.files, { user: req.user, claimId: claim._id }))
     );
   }
+
+  // What goes to PFMS has changed, so the bill is owed a place in the next
+  // file even if an older version of it was already downloaded.
+  claim.exportDue = true;
 
   claim.pushHistory('Claim Updated', req.user);
 
@@ -466,6 +490,12 @@ export const approveClaim = asyncHandler(async (req, res) => {
   claim.dcRemarks = req.body.remarks || '';
   claim.approvedAt = now;
   claim.decidedAt = now;
+  /*
+   * Approval is the moment a bill becomes payable, so it is owed a place in
+   * the next beneficiary file — including a bill approved a second time after
+   * a correction, whose earlier version was already downloaded.
+   */
+  claim.exportDue = true;
   claim.pushHistory(AUDIT_ACTIONS.CLAIM_APPROVED, req.user, req.body.remarks || '');
   await claim.save();
 
@@ -510,6 +540,7 @@ export const bulkApproveClaims = asyncHandler(async (req, res) => {
       claim.dcRemarks = remarks;
       claim.approvedAt = now;
       claim.decidedAt = now;
+      claim.exportDue = true;
       if (claim.lastExportedAt) claim.postExportRemarks = remarks;
       claim.pushHistory(AUDIT_ACTIONS.CLAIM_APPROVED, req.user, remarks || 'Bulk approval');
       await claim.save();
@@ -792,17 +823,23 @@ export const setPaymentStatus = asyncHandler(async (req, res) => {
     // history of failed attempts survives.
     claim.reversedAt = null;
     claim.reversalReason = '';
+    // Settled: it has no further business in a beneficiary file.
+    claim.exportDue = false;
   } else if (paymentStatus === PAYMENT_STATUS.REVERSED) {
     claim.reversedAt = new Date();
     claim.reversalReason = remarks;
     claim.reversalCount += 1;
     claim.paidAt = null;
+    // The money came back, so the bill must go out again — a fresh one as far
+    // as the next file is concerned.
+    claim.exportDue = true;
   } else {
-    // Back to Unpaid — the bill was never really settled.
+    // Back to Unpaid — the bill was never really settled, so it is owed again.
     claim.paidAt = null;
     claim.paymentRef = '';
     claim.reversedAt = null;
     claim.reversalReason = '';
+    claim.exportDue = true;
   }
 
   claim.paymentRemarks = remarks;
@@ -877,6 +914,9 @@ export const reviseExportedStatus = asyncHandler(async (req, res) => {
 
   claim.status = status;
   claim.postExportRemarks = remarks;
+  // The decision on this bill has changed since it was last downloaded, so
+  // the next file should carry the current one.
+  claim.exportDue = status === CLAIM_STATUS.APPROVED;
   if (status === CLAIM_STATUS.REJECTED) {
     claim.dcRemarks = remarks;
     claim.decidedAt = new Date();

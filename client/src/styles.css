@@ -755,3 +755,143 @@ tr.row-open:hover .go { color: var(--sky-d); }
 @media (max-width: 1100px) {
   .school-split { grid-template-columns: 1fr; }
 }
+
+/* ---- What a school has left, under the scheme it picked ---- */
+.budget-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: baseline;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--txt-m);
+}
+.budget-strip b { color: var(--txt); font-weight: 700; }
+.budget-left b { color: var(--em-d); }
+.budget-none, .budget-none b { color: var(--rose-d); font-weight: 700; }
+
+/* An amount past the ceiling reads as wrong while it is being typed. */
+input.over {
+  border-color: var(--rose) !important;
+  background: var(--rose-g);
+}
+
+/* ---- The "download it again" escape hatch, deliberately quiet ---- */
+.redownload {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 12px;
+  font-size: 12.5px;
+  color: var(--txt-m);
+  cursor: pointer;
+}
+.redownload input { margin-top: 2px; flex-shrink: 0; }
+.redownload em {
+  display: block;
+  font-style: normal;
+  font-size: 11.5px;
+  color: var(--txt-l);
+  margin-top: 2px;
+  max-width: 68ch;
+}
+
+/* ==========================  Batch review  =============================== */
+/* One school's bills under one scheme, decided together. */
+
+.batch-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.batch-card { display: flex; flex-direction: column; gap: 14px; }
+.batch-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.batch-card-head strong { font-size: 14px; color: var(--ink); }
+
+.batch-card-nums {
+  display: flex;
+  gap: 22px;
+  padding: 12px 0;
+  border-top: 1px solid var(--bd);
+  border-bottom: 1px solid var(--bd);
+}
+.batch-card-nums div { font-size: 11px; color: var(--txt-m); }
+.batch-card-nums span {
+  display: block;
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.4px;
+}
+.batch-card-ids { line-height: 1.6; word-break: break-word; }
+.batch-card .btn { align-self: flex-start; }
+
+/* The review sheet itself. */
+.batch-sheet {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 25, 41, 0.55);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  z-index: 60;
+}
+.batch-panel {
+  background: var(--white);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 1020px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.batch-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--bd);
+}
+.batch-head h2 { margin: 0; font-size: 18px; font-weight: 800; color: var(--ink); }
+.batch-head p { margin: 3px 0 0; font-size: 12.5px; color: var(--txt-m); }
+
+/* The list scrolls; the head and the decision stay in view. */
+.batch-body { padding: 18px 24px; overflow-y: auto; flex: 1; }
+
+.batch-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--bd);
+  background: var(--surf);
+  flex-wrap: wrap;
+}
+.batch-tally { font-size: 12.5px; color: var(--txt-m); }
+.batch-tally strong { color: var(--ink); font-size: 15px; }
+.batch-tally span {
+  display: block;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.3px;
+}
+
+@media (max-width: 760px) {
+  .batch-sheet { padding: 0; }
+  .batch-panel { max-height: 100vh; border-radius: 0; }
+}
