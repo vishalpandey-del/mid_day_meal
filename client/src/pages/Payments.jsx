@@ -46,10 +46,20 @@ export default function Payments() {
 
   const load = useCallback(() => {
     setRes(null);
-    api.get('/claims', { params: { status: 'Approved', paymentStatus: tab, q: query || undefined, limit: 100 } })
+    api.get('/claims', {
+      params: {
+        status: 'Approved',
+        paymentStatus: tab,
+        // The scheme narrows what is on screen, not only what downloads —
+        // choosing one and seeing the same list back says the filter is broken.
+        category: scheme || undefined,
+        q: query || undefined,
+        limit: 100,
+      },
+    })
       .then(({ data }) => setRes(data))
       .catch((e) => setError(errorText(e)));
-  }, [tab, query]);
+  }, [tab, query, scheme]);
 
   useEffect(load, [load]);
 
@@ -63,12 +73,21 @@ export default function Payments() {
   useEffect(() => {
     Promise.all(
       TABS.map((t) =>
-        api.get('/claims', { params: { status: 'Approved', paymentStatus: t.key, limit: 1 } })
+        api.get('/claims', {
+          params: {
+            status: 'Approved',
+            paymentStatus: t.key,
+            // The counts answer the same question as the list, so they are
+            // asked under the same scheme.
+            category: scheme || undefined,
+            limit: 1,
+          },
+        })
           .then(({ data }) => [t.key, data.total])
           .catch(() => [t.key, 0])
       )
     ).then((rows) => setCounts(Object.fromEntries(rows)));
-  }, [countTick]);
+  }, [countTick, scheme]);
 
   const setPayment = async (c, paymentStatus, remarks = '') => {
     setBusy(c._id);
@@ -198,7 +217,7 @@ export default function Payments() {
             <table>
               <thead>
                 <tr>
-                  <th>Claim ID</th><th>School</th><th>Account</th>
+                  <th>Claim ID</th><th>School</th><th>Scheme</th><th>Account</th>
                   <th className="num">Amount</th>
                   <th>{tab === 'Payment Reversed' ? 'Reversed On' : 'Approved'}</th>
                   {tab === 'Payment Reversed' && <th>Reason</th>}
@@ -217,6 +236,12 @@ export default function Payments() {
                       )}
                     </td>
                     <td>{c.school?.name}</td>
+                    {/* The scheme decides which budget the payment comes out
+                        of, so it belongs on the line, not one click away. */}
+                    <td className="small">
+                      {c.category}
+                      {c.budgetHead && <div className="small muted"><code>{c.budgetHead}</code></div>}
+                    </td>
                     <td className="small">
                       {c.school?.bank?.accountNumber
                         ? <code>{c.school.bank.accountNumber}</code>

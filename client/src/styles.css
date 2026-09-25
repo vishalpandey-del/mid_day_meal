@@ -803,39 +803,6 @@ input.over {
 /* ==========================  Batch review  =============================== */
 /* One school's bills under one scheme, decided together. */
 
-.batch-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
-  margin-bottom: 18px;
-}
-.batch-card { display: flex; flex-direction: column; gap: 14px; }
-.batch-card-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 10px;
-}
-.batch-card-head strong { font-size: 14px; color: var(--ink); }
-
-.batch-card-nums {
-  display: flex;
-  gap: 22px;
-  padding: 12px 0;
-  border-top: 1px solid var(--bd);
-  border-bottom: 1px solid var(--bd);
-}
-.batch-card-nums div { font-size: 11px; color: var(--txt-m); }
-.batch-card-nums span {
-  display: block;
-  font-size: 19px;
-  font-weight: 800;
-  color: var(--ink);
-  letter-spacing: -0.4px;
-}
-.batch-card-ids { line-height: 1.6; word-break: break-word; }
-.batch-card .btn { align-self: flex-start; }
-
 /* The review sheet itself. */
 .batch-sheet {
   position: fixed;
@@ -894,4 +861,38 @@ input.over {
 @media (max-width: 760px) {
   .batch-sheet { padding: 0; }
   .batch-panel { max-height: 100vh; border-radius: 0; }
+}
+
+/* ---- Inside the review sheet: one block per scheme ---- */
+.batch-scheme { margin-bottom: 20px; }
+.batch-scheme:last-of-type { margin-bottom: 8px; }
+
+.batch-scheme-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 12px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 9px 9px 0 0;
+  border-bottom: 0;
+  flex-wrap: wrap;
+}
+.batch-scheme-head label {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+}
+.batch-scheme-head strong { color: var(--ink); }
+.batch-scheme-head code {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--txt-m);
+}
+.batch-scheme .table-wrap {
+  border: 1px solid var(--bd);
+  border-radius: 0 0 9px 9px;
 }

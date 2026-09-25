@@ -25,6 +25,7 @@ export default function MyQueue() {
    * works from; the flat list stays for finding one bill among many.
    */
   const [batches, setBatches] = useState([]);
+  const [singles, setSingles] = useState([]);
   const [view, setView] = useState('batches');
   const [reviewing, setReviewing] = useState(null);
   const [error, setError] = useState('');
@@ -40,6 +41,7 @@ export default function MyQueue() {
       .then(({ data }) => {
         setClaims(data.claims);
         setBatches(data.batches || []);
+        setSingles(data.singles || []);
         setPicked(new Set());
       })
       .catch((e) => setError(errorText(e)));
@@ -69,6 +71,9 @@ export default function MyQueue() {
       return kept.length === prev.size ? prev : new Set(kept);
     });
   }, [q, claims]);
+
+  /* Switching tabs changes what is on screen, so the ticks start again. */
+  useEffect(() => { setPicked(new Set()); }, [view]);
 
   /* One approval path, whether the bills were ticked in the list or in a batch. */
   const approveMany = async (ids, note) => {
@@ -114,21 +119,44 @@ export default function MyQueue() {
    * must mean the rows being looked at — approving something filtered out of
    * sight is exactly the mistake this screen cannot afford.
    */
-  /* The same search narrows the batches, keeping only matching bills in each. */
+  const matches = (c) => [c.claimId, c.vendorName, c.billNumber, c.school?.name, c.category]
+    .some((v) => String(v || '').toLowerCase().includes(needle));
+
+  /* The same search narrows the schools, keeping only matching bills in each. */
   const shownBatches = (!needle ? batches : batches
     .map((b) => {
-      const claims = b.claims.filter((c) => [c.claimId, c.vendorName, c.billNumber, c.school?.name, c.category]
-        .some((v) => String(v || '').toLowerCase().includes(needle)));
-      return claims.length
-        ? { ...b, claims, count: claims.length, total: claims.reduce((s, c) => s + c.amount, 0) }
-        : null;
+      const kept = b.claims.filter(matches);
+      if (!kept.length) return null;
+      const keptIds = new Set(kept.map((c) => c._id));
+      return {
+        ...b,
+        claims: kept,
+        count: kept.length,
+        total: kept.reduce((s, c) => s + c.amount, 0),
+        schemes: (b.schemes || [])
+          .map((sc) => {
+            const claims = sc.claims.filter((c) => keptIds.has(c._id));
+            return claims.length
+              ? { ...sc, claims, count: claims.length, total: claims.reduce((s, c) => s + c.amount, 0) }
+              : null;
+          })
+          .filter(Boolean),
+      };
     })
     .filter(Boolean));
 
-  const shownIds = shown.map((c) => c._id);
-  const allPicked = shown.length > 0 && shownIds.every((id) => picked.has(id));
+  /*
+   * For the DC the second tab is the bills that could not be batched — one
+   * per school. Everyone else has no batching at all, so their tab is the
+   * whole queue.
+   */
+  const shownSingles = !isDc ? shown : (needle ? singles.filter(matches) : singles);
+  const listed = isDc ? shownSingles : shown;
+
+  const shownIds = listed.map((c) => c._id);
+  const allPicked = listed.length > 0 && shownIds.every((id) => picked.has(id));
   const toggleAll = () => setPicked(allPicked ? new Set() : new Set(shownIds));
-  const pickedTotal = shown
+  const pickedTotal = listed
     .filter((c) => picked.has(c._id))
     .reduce((s, c) => s + c.amount, 0);
 
@@ -148,54 +176,78 @@ export default function MyQueue() {
       {isDc && batches.length > 0 && (
         <div className="pill-tabs">
           <button className={view === 'batches' ? 'on' : ''} onClick={() => setView('batches')}>
-            Batch Bills ({shownBatches.length})
+            Batch Bills ({shownBatches.length} school{shownBatches.length === 1 ? '' : 's'})
           </button>
           <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>
-            All Bills ({shown.length})
+            Single Bills ({shownSingles.length})
           </button>
         </div>
       )}
 
+      {/* A school per row: open one to see its bills, grouped by scheme. */}
       {isDc && view === 'batches' && (
         shownBatches.length === 0 ? (
-          <Card><Empty>{needle ? 'No batch matches that.' : 'Nothing is waiting for you right now.'}</Empty></Card>
+          <Card><Empty>{needle ? 'No school matches that.' : 'No school has more than one bill waiting.'}</Empty></Card>
         ) : (
-          <div className="batch-grid">
-            {shownBatches.map((b) => (
-              <Card key={b.key}>
-                <div className="batch-card">
-                  <div className="batch-card-head">
-                    <div>
-                      <strong>{b.school?.name}</strong>
-                      <div className="small muted">{b.category} · {b.budgetHead}</div>
-                    </div>
-                    {b.breached > 0 && <Badge tone="red">{b.breached} past SLA</Badge>}
-                  </div>
-
-                  <div className="batch-card-nums">
-                    <div><span>{b.count}</span>bill(s)</div>
-                    <div><span>{inr(b.total)}</span>together</div>
-                    <div><span>{b.oldestDays}d</span>oldest</div>
-                  </div>
-
-                  <div className="batch-card-ids small muted">
-                    {b.claims.slice(0, 4).map((c) => c.claimId).join(' · ')}
-                    {b.count > 4 && ` · +${b.count - 4} more`}
-                  </div>
-
-                  <button className="btn primary sm" onClick={() => setReviewing(b)}>
-                    Review &amp; Approve →
-                  </button>
-                </div>
-              </Card>
-            ))}
-          </div>
+          <Card title={`${shownBatches.length} school(s) with bills waiting`} padded={false}>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>School</th><th>Block</th><th>Schemes</th>
+                    <th className="num">Bills</th><th className="num">Together</th>
+                    <th className="num">Oldest</th><th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shownBatches.map((b) => (
+                    <tr
+                      key={b.key}
+                      className="row-open"
+                      role="button"
+                      tabIndex={0}
+                      title={`Open ${b.school?.name}`}
+                      onClick={() => setReviewing(b)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setReviewing(b); }
+                      }}
+                    >
+                      <td>
+                        <strong>{b.school?.name}</strong>
+                        <div className="small muted"><code>{b.school?.code}</code></div>
+                      </td>
+                      <td className="small muted">{b.block?.name || b.school?.block}</td>
+                      <td className="small">
+                        {(b.schemes || []).map((sc) => (
+                          <div key={sc.category}>
+                            {sc.category} <span className="muted">· {sc.count}</span>
+                          </div>
+                        ))}
+                      </td>
+                      <td className="num"><strong>{b.count}</strong></td>
+                      <td className="num">{inr(b.total)}</td>
+                      <td className="num">
+                        <Badge tone={b.breached > 0 ? 'red' : b.oldestDays >= 5 ? 'amber' : 'green'}>
+                          {b.oldestDays}d
+                        </Badge>
+                      </td>
+                      <td className="go">review →</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         )
       )}
 
       {(!isDc || view === 'list') && (
       <Card
-        title={`My Queue · ${shown.length} claim(s)${needle && shown.length !== claims.length ? ` of ${claims.length}` : ''}`}
+        title={
+          isDc
+            ? `Single Bills · ${listed.length}`
+            : `My Queue · ${listed.length} claim(s)${needle && listed.length !== claims.length ? ` of ${claims.length}` : ''}`
+        }
         actions={
           isDc && picked.size > 0 ? (
             <div className="row">
@@ -208,8 +260,14 @@ export default function MyQueue() {
         }
         padded={false}
       >
-        {shown.length === 0 ? (
-          <Empty>{needle ? 'No claim in your queue matches that.' : 'Nothing is waiting for you right now.'}</Empty>
+        {listed.length === 0 ? (
+          <Empty>
+            {needle
+              ? 'No claim here matches that.'
+              : isDc
+                ? 'Every school with a bill waiting has more than one — they are all in Batch Bills.'
+                : 'Nothing is waiting for you right now.'}
+          </Empty>
         ) : (
           <div className="table-wrap">
             <table>
@@ -232,7 +290,7 @@ export default function MyQueue() {
                 </tr>
               </thead>
               <tbody>
-                {shown.map((c) => (
+                {listed.map((c) => (
                   <tr key={c._id} {...openRow(`/claims/${c._id}`, `Open ${c.claimId}`)}>
                     {isDc && (
                       /* Ticking a box is selecting, not opening, so the cell

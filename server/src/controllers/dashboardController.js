@@ -329,39 +329,68 @@ export const getMyQueue = asyncHandler(async (req, res) => {
   });
 
   /*
-   * The same claims, gathered into batches — one per school and scheme.
+   * The same claims, gathered by school.
    *
-   * A school usually sends several bills against the same scheme in a month,
-   * and the district decides them together: same head teacher, same budget
-   * head, same question. Deciding them one screen at a time is the same work
-   * done ten times. Grouping here rather than on the client keeps the two
-   * views showing the same set, and a batch of one is still listed so nothing
-   * hides from the count.
+   * A school sends several bills in a month and the district decides them in
+   * one sitting: same head teacher, same questions, one conversation. So the
+   * list is of schools, and opening one shows its bills — grouped by scheme
+   * inside, because the scheme decides which budget the money leaves.
+   *
+   * A school with a single bill waiting is not a batch; it is one bill, and
+   * is left to the ordinary list so the batch view stays what its name says.
    */
-  const batches = [...withAge.reduce((map, c) => {
+  const bySchool = withAge.reduce((map, c) => {
     const schoolId = String(c.school?._id || c.school);
-    const key = `${schoolId}::${c.category}`;
-    const batch = map.get(key) || {
-      key,
+    const entry = map.get(schoolId) || {
+      key: schoolId,
       school: c.school,
-      category: c.category,
-      budgetHead: c.budgetHead,
+      block: c.block,
       claims: [],
       total: 0,
       oldestDays: 0,
       breached: 0,
+      schemes: new Map(),
     };
-    batch.claims.push(c);
-    batch.total += c.amount;
-    batch.oldestDays = Math.max(batch.oldestDays, c.ageDays || 0);
-    if (c.slaBucket === 'breached') batch.breached += 1;
-    map.set(key, batch);
+    entry.claims.push(c);
+    entry.total += c.amount;
+    entry.oldestDays = Math.max(entry.oldestDays, c.ageDays || 0);
+    if (c.slaBucket === 'breached') entry.breached += 1;
+
+    const scheme = entry.schemes.get(c.category) || {
+      category: c.category,
+      budgetHead: c.budgetHead,
+      claims: [],
+      total: 0,
+    };
+    scheme.claims.push(c);
+    scheme.total += c.amount;
+    entry.schemes.set(c.category, scheme);
+
+    map.set(schoolId, entry);
     return map;
-  }, new Map()).values()]
-    // The district works oldest-first, and a bigger group is worth more of
-    // one sitting than a single bill of the same age.
-    .sort((a, b) => b.oldestDays - a.oldestDays || b.claims.length - a.claims.length)
-    .map((b) => ({ ...b, count: b.claims.length }));
+  }, new Map());
+
+  const shape = (e) => ({
+    key: e.key,
+    school: e.school,
+    block: e.block,
+    claims: e.claims,
+    count: e.claims.length,
+    total: e.total,
+    oldestDays: e.oldestDays,
+    breached: e.breached,
+    schemes: [...e.schemes.values()]
+      .map((x) => ({ ...x, count: x.claims.length }))
+      .sort((a, b) => b.total - a.total),
+  });
+
+  const all = [...bySchool.values()].map(shape)
+    // The district works oldest-first, and a school with more waiting is
+    // worth more of one sitting than a single bill of the same age.
+    .sort((a, b) => b.oldestDays - a.oldestDays || b.count - a.count);
+
+  const batches = all.filter((b) => b.count > 1);
+  const singles = all.filter((b) => b.count === 1).flatMap((b) => b.claims);
 
   res.json({
     success: true,
@@ -370,6 +399,9 @@ export const getMyQueue = asyncHandler(async (req, res) => {
     claims: withAge,
     batches,
     batchCount: batches.length,
+    // Bills whose school has only this one waiting: nothing to batch.
+    singles,
+    singleCount: singles.length,
   });
 });
 
