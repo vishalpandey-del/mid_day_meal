@@ -889,18 +889,27 @@ export const setPaymentStatus = asyncHandler(async (req, res) => {
 });
 
 /**
- * PATCH /api/claims/:id/revise-status — change the status of a claim that has
- * already been downloaded in a beneficiary file. A remark is mandatory, and
- * the change is recorded distinctly in the audit trail.
+ * PATCH /api/claims/:id/revise-status — the DC changes a decision it has
+ * already made. A remark is mandatory, and the change is recorded distinctly
+ * in the audit trail.
+ *
+ * This used to insist the bill had been exported first, which left a decision
+ * made and not yet downloaded with no way back: the ordinary reject refuses an
+ * Approved bill, and this refused an unexported one, so a wrong approval could
+ * only be corrected after it had gone into a payment file. The remark matters
+ * more once money has moved, not less, so a bill already exported carries the
+ * stronger wording — but either can be put right.
  */
 export const reviseExportedStatus = asyncHandler(async (req, res) => {
   const claim = await Claim.findById(req.params.id).populate('school', 'name');
   if (!claim) throw ApiError.notFound('Claim not found.');
   assertCanView(claim, req.user);
 
-  if (!claim.lastExportedAt) {
+  const DECIDED = [CLAIM_STATUS.APPROVED, CLAIM_STATUS.REJECTED];
+  if (!DECIDED.includes(claim.status)) {
     throw ApiError.badRequest(
-      'This claim has not been exported yet. Use the normal approve/reject actions.'
+      `This claim is "${claim.status}" — there is no decision to revise yet. ` +
+      'Use the ordinary approve, reject or query actions.'
     );
   }
 

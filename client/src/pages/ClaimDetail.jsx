@@ -65,7 +65,12 @@ export default function ClaimDetail() {
   const canChecker = role === 'school_checker' && s === 'Pending Checker Review';
   const canDc = role === 'dc' && ['Submitted', 'Resubmitted', 'Under Query'].includes(s);
   const canPay = role === 'dc' && s === 'Approved';
-  const canRevise = role === 'dc' && claim.lastExportedAt;
+  /*
+   * A decision already made can be changed — whether or not the bill has
+   * reached a payment file. Waiting for the export left a wrong approval with
+   * no way back until after it had gone out for payment.
+   */
+  const canRevise = role === 'dc' && ['Approved', 'Rejected'].includes(s);
   // A rejection is the DC's decision, so only the DC can take it back.
   const canReopen = role === 'dc' && s === 'Rejected';
 
@@ -215,7 +220,11 @@ export default function ClaimDetail() {
                     Withdraw Rejection
                   </button>
                 )}
-                {canRevise && <button className="btn red" onClick={() => setAction('revise')}>Revise Status</button>}
+                {canRevise && (
+                  <button className="btn red" onClick={() => setAction('revise')}>
+                    {claim.lastExportedAt ? 'Revise Status' : 'Change Decision'}
+                  </button>
+                )}
 
                 {!canMakerEdit && !canMakerSubmit && !canMakerRespond && !canChecker &&
                  !canDc && !canPay && !canRevise && !canReopen && (
@@ -236,7 +245,10 @@ export default function ClaimDetail() {
                     placeholder={
                       action === 'approve' ? 'Optional remark'
                       : action === 'query' ? 'What must the school clarify?'
-                      : action === 'revise' ? 'Why is this changing after the file was downloaded?'
+                      : action === 'revise'
+                        ? (claim.lastExportedAt
+                            ? 'Why is this changing after the file was downloaded?'
+                            : 'Why is the decision changing?')
                       : action === 'reopen' ? 'Why is the rejection being withdrawn?'
                       : 'Enter your remark'
                     }
