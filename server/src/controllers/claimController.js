@@ -34,7 +34,7 @@ import { persistFiles, readFile, removeFiles } from '../middleware/upload.js';
 /** GET /api/claims — paginated, filterable list within the caller's scope. */
 export const listClaims = asyncHandler(async (req, res) => {
   const {
-    status, category, budgetHead, school, block, paymentStatus, q,
+    status, category, budgetHead, school, block, paymentStatus, exportState, q,
     from, to, minAmount, maxAmount,
     page = 1, limit = 20, sort = '-createdAt',
   } = req.query;
@@ -45,6 +45,15 @@ export const listClaims = asyncHandler(async (req, res) => {
   if (category) filter.category = category;
   if (budgetHead) filter.budgetHead = budgetHead;
   if (paymentStatus) filter.paymentStatus = paymentStatus;
+
+  /*
+   * Whether a bill is still waiting to go into a beneficiary file, or has
+   * already been in one. The payments desk shows these as separate tabs: a
+   * bill that has gone out is no longer work to do, but it is not paid yet
+   * either, so it belongs in neither of the two ends.
+   */
+  if (exportState === 'due') filter.exportDue = { $ne: false };
+  if (exportState === 'sent') filter.exportDue = false;
 
   // A narrower scope always wins over a query parameter.
   if (school && !filter.school) filter.school = toObjectId(school);
@@ -830,8 +839,12 @@ export const setPaymentStatus = asyncHandler(async (req, res) => {
     claim.reversalReason = remarks;
     claim.reversalCount += 1;
     claim.paidAt = null;
-    // The money came back, so the bill must go out again — a fresh one as far
-    // as the next file is concerned.
+    /*
+     * The money came back, so the bill is owed a file again — and it leaves
+     * Downloaded in the same move. Without that it would sit there marked as
+     * already sent, and the one-file-per-bill rule would refuse to put it in
+     * the next file, which is exactly the file it now needs to be in.
+     */
     claim.exportDue = true;
   } else {
     // Back to Unpaid — the bill was never really settled, so it is owed again.

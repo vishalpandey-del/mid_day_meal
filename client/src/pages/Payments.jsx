@@ -7,20 +7,27 @@ import useDebounced from '../utils/useDebounced.js';
 import useOpenRow from '../utils/useOpenRow.js';
 
 /**
- * The DC payment desk. Bills sit in one of three states:
- *   Unpaid            — approved, never paid out
+ * The DC payment desk, in the order a bill travels:
+ *
+ *   Awaiting Payment  — approved, not yet in any beneficiary file
+ *   Downloaded        — in a file, sent to the treasury, waiting on the money
  *   Paid              — settled
- *   Payment Reversed  — money went out and came back; must be paid again
+ *   Payment Reversed  — the money came back; owed again
+ *
+ * Awaiting and Downloaded are both "Unpaid" to the database; what separates
+ * them is whether the bill has been into a file. Keeping them apart means the
+ * awaiting list is work still to do, not a pile that grows forever.
  */
 const TABS = [
-  { key: 'Unpaid', label: 'Awaiting Payment', tone: 'amber' },
-  { key: 'Paid', label: 'Paid', tone: 'green' },
-  { key: 'Payment Reversed', label: 'Payment Reversed', tone: 'red' },
+  { key: 'awaiting', label: 'Awaiting Payment', tone: 'amber', params: { paymentStatus: 'Unpaid', exportState: 'due' } },
+  { key: 'downloaded', label: 'Downloaded', tone: 'blue', params: { paymentStatus: 'Unpaid', exportState: 'sent' } },
+  { key: 'paid', label: 'Paid', tone: 'green', params: { paymentStatus: 'Paid' } },
+  { key: 'reversed', label: 'Payment Reversed', tone: 'red', params: { paymentStatus: 'Payment Reversed' } },
 ];
 
 export default function Payments() {
   const openRow = useOpenRow();
-  const [tab, setTab] = useState('Unpaid');
+  const [tab, setTab] = useState('awaiting');
   const [q, setQ] = useState('');
   const query = useDebounced(q);
   // The PFMS file can be narrowed to one scheme, because a treasury upload is
@@ -49,7 +56,7 @@ export default function Payments() {
     api.get('/claims', {
       params: {
         status: 'Approved',
-        paymentStatus: tab,
+        ...(TABS.find((t) => t.key === tab)?.params || {}),
         // The scheme narrows what is on screen, not only what downloads —
         // choosing one and seeing the same list back says the filter is broken.
         category: scheme || undefined,
@@ -76,7 +83,7 @@ export default function Payments() {
         api.get('/claims', {
           params: {
             status: 'Approved',
-            paymentStatus: t.key,
+            ...t.params,
             // The counts answer the same question as the list, so they are
             // asked under the same scheme.
             category: scheme || undefined,
@@ -122,15 +129,22 @@ export default function Payments() {
             /* The file follows the tab and the chosen scheme, and by default
                leaves out bills that have already been downloaded. */
             downloadFile('/reports/beneficiary.xlsx', {
-              paymentStatus: tab,
+              paymentStatus: active.params.paymentStatus,
               ...(scheme ? { category: scheme } : {}),
-              ...(redownload ? { includeExported: 'true' } : {}),
+              // The opt-in only means anything on the awaiting tab, which is
+              // the only one that holds bills back.
+              ...(redownload && tab === 'awaiting' ? { includeExported: 'true' } : {}),
             })
               .then((n) => setNote(
                 `Downloaded ${n} — ${scheme || 'all schemes'}, ${active.label.toLowerCase()}` +
                 (redownload ? ', including bills already exported.' : '.')
               ))
-              .then(load)
+              .then(() => {
+                load();
+                // A download moves bills from Awaiting into Downloaded, so
+                // the tab counts above are stale the moment the file lands.
+                setCountTick((n) => n + 1);
+              })
               .catch((e) => setError(errorText(e)))
           }
         >
@@ -153,14 +167,14 @@ export default function Payments() {
         ))}
       </div>
 
-      {counts['Payment Reversed'] > 0 && tab !== 'Payment Reversed' && (
+      {counts.reversed > 0 && tab !== 'reversed' && (
         <Alert kind="warn">
-          <strong>{counts['Payment Reversed']} bill(s)</strong> came back from the treasury and
+          <strong>{counts.reversed} bill(s)</strong> came back from the treasury and
           still need paying.{' '}
           <button
             className="btn sm"
             style={{ marginLeft: 6 }}
-            onClick={() => setTab('Payment Reversed')}
+            onClick={() => setTab('reversed')}
           >
             Open them →
           </button>
@@ -208,9 +222,11 @@ export default function Payments() {
           <Spinner />
         ) : res.claims.length === 0 ? (
           <Empty>
-            {tab === 'Payment Reversed'
+            {tab === 'reversed'
               ? 'No reversed payments — everything that went out stayed out.'
-              : `No ${active.label.toLowerCase()} bills.`}
+              : tab === 'downloaded'
+                ? 'Nothing has been downloaded yet. Bills move here once they go into a beneficiary file.'
+                : `No ${active.label.toLowerCase()} bills.`}
           </Empty>
         ) : (
           <div className="table-wrap">
@@ -219,8 +235,8 @@ export default function Payments() {
                 <tr>
                   <th>Claim ID</th><th>School</th><th>Scheme</th><th>Account</th>
                   <th className="num">Amount</th>
-                  <th>{tab === 'Payment Reversed' ? 'Reversed On' : 'Approved'}</th>
-                  {tab === 'Payment Reversed' && <th>Reason</th>}
+                  <th>{tab === 'reversed' ? 'Reversed On' : 'Approved'}</th>
+                  {tab === 'reversed' && <th>Reason</th>}
                   <th>Exported</th><th></th>
                 </tr>
               </thead>
@@ -249,9 +265,9 @@ export default function Payments() {
                     </td>
                     <td className="num">{inr(c.amount)}</td>
                     <td className="small">
-                      {dateOf(tab === 'Payment Reversed' ? c.reversedAt : c.approvedAt)}
+                      {dateOf(tab === 'reversed' ? c.reversedAt : c.approvedAt)}
                     </td>
-                    {tab === 'Payment Reversed' && (
+                    {tab === 'reversed' && (
                       <td className="small" style={{ maxWidth: 240 }}>{c.reversalReason}</td>
                     )}
                     <td className="small">
@@ -263,13 +279,16 @@ export default function Payments() {
                         open it, so this cell keeps its clicks. */}
                     <td onClick={(e) => e.stopPropagation()}>
                       <div className="row">
-                        {tab === 'Unpaid' && (
+                        {/* A bill is marked paid from either end of the wait:
+                            before it goes into a file, or after the treasury
+                            has settled the file it went out in. */}
+                        {(tab === 'awaiting' || tab === 'downloaded') && (
                           <button className="btn green sm" disabled={busy === c._id}
                                   onClick={() => setPayment(c, 'Paid')}>
                             {busy === c._id ? '…' : 'Mark Paid'}
                           </button>
                         )}
-                        {tab === 'Paid' && (
+                        {tab === 'paid' && (
                           <>
                             <button className="btn red sm" disabled={busy === c._id}
                                     onClick={() => { setReversing(c); setReason(''); }}>
@@ -281,7 +300,7 @@ export default function Payments() {
                             </button>
                           </>
                         )}
-                        {tab === 'Payment Reversed' && (
+                        {tab === 'reversed' && (
                           <button className="btn green sm" disabled={busy === c._id}
                                   onClick={() => setPayment(c, 'Paid', 'Re-paid after reversal')}>
                             {busy === c._id ? '…' : 'Pay Again'}

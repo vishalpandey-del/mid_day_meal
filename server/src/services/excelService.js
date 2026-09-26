@@ -62,7 +62,14 @@ export const buildWorkbook = ({ headers, rows, title }) => {
 
 /**
  * PFMS "Add Beneficiary Details" file.
- * The beneficiary is ALWAYS the school — bank details come from the school master.
+ *
+ * The beneficiary is ALWAYS the school — bank details come from the school
+ * master — and a school is paid once per scheme, not once per bill. Five Mid
+ * Day Meal bills for one school are one transfer into one account against one
+ * budget head, so they are one line here, with every claim id named in the
+ * remark so the transfer can be traced back to the bills it settles. A second
+ * scheme for the same school is a separate line: different budget head,
+ * different money.
  */
 export const buildBeneficiaryWorkbook = (claims) => {
   const headers = [
@@ -70,8 +77,24 @@ export const buildBeneficiaryWorkbook = (claims) => {
     'IFSC Code', 'GSTIN No', 'Amount (In Lakhs)', 'Remarks',
   ];
 
-  const rows = claims.map((c, i) => {
-    const s = c.school || {};
+  const merged = [...claims.reduce((map, c) => {
+    const school = c.school || {};
+    const key = `${String(school._id || c.school)}::${c.category}`;
+    const line = map.get(key) || {
+      school,
+      category: c.category,
+      budgetHead: c.budgetHead,
+      amount: 0,
+      claimIds: [],
+    };
+    line.amount += c.amount;
+    line.claimIds.push(c.claimId);
+    map.set(key, line);
+    return map;
+  }, new Map()).values()];
+
+  const rows = merged.map((line, i) => {
+    const s = line.school;
     const bank = s.bank || {};
     return [
       i + 1,
@@ -80,8 +103,10 @@ export const buildBeneficiaryWorkbook = (claims) => {
       bank.bankName || '',
       bank.ifsc || '',
       s.gstin || '',
-      Number((c.amount / 100000).toFixed(5)),
-      `${c.claimId} | ${s.name || ''} | ${c.status}`,
+      Number((line.amount / 100000).toFixed(5)),
+      // The remark carries the trail: which scheme, and every bill in it.
+      `${line.category}${line.budgetHead ? ` (${line.budgetHead})` : ''} | ` +
+      `${line.claimIds.length} bill(s) | ${line.claimIds.join(', ')}`,
     ];
   });
 

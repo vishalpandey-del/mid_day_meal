@@ -127,18 +127,25 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
     filter.paymentStatus = { $in: PAYABLE_STATES };
   }
 
-  /*
-   * One bill, one file. A bill already downloaded is left out, so a second
-   * download cannot ask PFMS to pay the same vendor twice. It comes back only
-   * when something changes: the bill is edited, or its payment is undone.
-   * `includeExported=true` overrides this for a DC who needs the full list
-   * again — to re-upload a file lost before it reached PFMS, say.
-   */
   const scheme = req.query.category;
   if (scheme) filter.category = scheme;
 
+  /*
+   * One bill, one file — but only where a file means money moving.
+   *
+   * A bill awaiting payment goes out once: downloading it again would ask
+   * PFMS to pay the same vendor twice, with nothing in the second file to say
+   * it is a repeat. Paid and reversed bills are a different matter. Those
+   * tabs are a record of what happened, read as often as anyone needs, and
+   * the bills in them have already left the payment queue — so nothing is
+   * held back there.
+   *
+   * `includeExported=true` lifts the rule on the awaiting tab too, for a file
+   * lost before it reached the treasury.
+   */
+  const guarded = !tab || tab === PAYMENT_STATUS.UNPAID;
   const redownload = req.query.includeExported === 'true';
-  if (!redownload) filter.exportDue = { $ne: false };
+  if (guarded && !redownload) filter.exportDue = { $ne: false };
 
   const claims = await fetchClaims(filter);
   if (!claims.length) {
@@ -147,10 +154,11 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
       scheme ? `under ${scheme}` : null,
     ].filter(Boolean).join(' ');
     throw ApiError.badRequest(
-      redownload
+      !guarded || redownload
         ? `No approved claims match this filter${where ? ` (${where})` : ''}, so there is nothing to export.`
-        : `Nothing new to export${where ? ` in ${where}` : ''}. Every approved bill here has already been ` +
-          'downloaded. A bill comes back when it is edited, or when its payment is undone.'
+        : `Nothing new to export${where ? ` in ${where}` : ''}. Every bill awaiting payment here has already ` +
+          'been downloaded — they are in the Downloaded tab. A bill returns when it is edited, ' +
+          'or when its payment is undone or reversed.'
     );
   }
 
@@ -170,15 +178,21 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
   const fileName = `pfms-beneficiary${slug}-${todayStamp()}.xlsx`;
   const wb = buildBeneficiaryWorkbook(claims);
 
-  // Stamp the claims before streaming, so the record exists even if the
-  // download is interrupted client-side.
+  /*
+   * Stamp the claims before streaming, so the record exists even if the
+   * download is interrupted client-side.
+   *
+   * Only a guarded download spends a bill. Reading the paid or reversed list
+   * is not sending it anywhere, and marking those as sent would be worse than
+   * pointless: a reversed bill is owed a payment file, and clearing its flag
+   * here would leave it unable to enter one — downloaded once, according to a
+   * download that never asked anyone to pay it.
+   */
   const now = new Date();
   await Claim.updateMany(
     { _id: { $in: claims.map((c) => c._id) } },
     {
-      // Written as one update with the stamp: the bill is in the file now, so
-      // it stops being due in the same breath.
-      $set: { lastExportedAt: now, exportDue: false },
+      $set: guarded ? { lastExportedAt: now, exportDue: false } : { lastExportedAt: now },
       $push: {
         exportHistory: {
           exportedAt: now,
