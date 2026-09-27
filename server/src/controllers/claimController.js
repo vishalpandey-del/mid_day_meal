@@ -44,16 +44,40 @@ export const listClaims = asyncHandler(async (req, res) => {
   if (status) filter.status = { $in: String(status).split(',') };
   if (category) filter.category = category;
   if (budgetHead) filter.budgetHead = budgetHead;
-  if (paymentStatus) filter.paymentStatus = paymentStatus;
+  // Several states at once, so one tab can ask for "paid or reversed".
+  if (paymentStatus) {
+    const wanted = String(paymentStatus).split(',').map((v) => v.trim()).filter(Boolean);
+    filter.paymentStatus = wanted.length > 1 ? { $in: wanted } : wanted[0];
+  }
 
   /*
    * Whether a bill is still waiting to go into a beneficiary file, or has
-   * already been in one. The payments desk shows these as separate tabs: a
-   * bill that has gone out is no longer work to do, but it is not paid yet
-   * either, so it belongs in neither of the two ends.
+   * already been in one. The payments desk reads both: a bill that has gone
+   * out is no longer work to do, whether or not the money has moved yet.
+   *
+   * `reversible` is the odd one, because its tab answers a question rather
+   * than describing a state: what can still be taken back? Two kinds of bill
+   * can — one that bounced, and one that was paid and whose file has gone,
+   * which is the last moment to undo a payment marked in error. They differ
+   * in export state, so they cannot share one, and building the pair on the
+   * client would let the two ends drift apart.
    */
   if (exportState === 'due') filter.exportDue = { $ne: false };
   if (exportState === 'sent') filter.exportDue = false;
+  if (exportState === 'reversible') {
+    // Under $and, because the search below claims $or for itself and the two
+    // must both hold: a search within this tab, not instead of it.
+    filter.$and = [
+      ...(filter.$and || []),
+      {
+        $or: [
+          { paymentStatus: PAYMENT_STATUS.REVERSED },
+          { paymentStatus: PAYMENT_STATUS.PAID, exportDue: false },
+        ],
+      },
+    ];
+    delete filter.paymentStatus;
+  }
 
   // A narrower scope always wins over a query parameter.
   if (school && !filter.school) filter.school = toObjectId(school);
@@ -805,7 +829,18 @@ export const setPaymentStatus = asyncHandler(async (req, res) => {
   const { paymentStatus, paymentRef = '', remarks = '' } = req.body;
   const from = claim.paymentStatus;
 
-  if (from === paymentStatus) {
+  /*
+   * Saying "Paid" about a bill already paid is normally a slip worth catching.
+   * There is one case where it is the whole point: a paid bill whose file has
+   * gone out sits in Reversed so a payment marked by mistake can be taken
+   * back, and pressing Pay Again there means "this payment stands" — which
+   * returns it to Paid, owed a fresh file, so the treasury is told what is
+   * true now. Nothing about the payment changes; where it sits does.
+   */
+  const reaffirmingPayment =
+    from === paymentStatus && paymentStatus === PAYMENT_STATUS.PAID && claim.exportDue === false;
+
+  if (from === paymentStatus && !reaffirmingPayment) {
     throw ApiError.badRequest(`This bill is already marked "${paymentStatus}".`);
   }
 
@@ -832,8 +867,18 @@ export const setPaymentStatus = asyncHandler(async (req, res) => {
     // history of failed attempts survives.
     claim.reversedAt = null;
     claim.reversalReason = '';
-    // Settled: it has no further business in a beneficiary file.
-    claim.exportDue = false;
+    /*
+     * Marking a bill paid puts it back at the front of the desk, not out of
+     * sight: the payment has to be told to the treasury in the next file
+     * before it is really finished. So it is owed a file again, which takes
+     * it out of Downloaded and into Paid, where it waits for that file.
+     *
+     * This is what makes the whole desk circular and the file always current.
+     * Without it a bill paid after a reversal would sit in Downloaded marked
+     * as already sent, and the one-file-per-bill rule would keep it out of
+     * the very file that has to carry its new state.
+     */
+    claim.exportDue = true;
   } else if (paymentStatus === PAYMENT_STATUS.REVERSED) {
     claim.reversedAt = new Date();
     claim.reversalReason = remarks;

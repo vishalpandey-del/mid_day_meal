@@ -7,22 +7,59 @@ import useDebounced from '../utils/useDebounced.js';
 import useOpenRow from '../utils/useOpenRow.js';
 
 /**
- * The DC payment desk, in the order a bill travels:
+ * The DC payment desk. A bill goes round it, and every lap sends a file.
  *
- *   Awaiting Payment  — approved, not yet in any beneficiary file
- *   Downloaded        — in a file, sent to the treasury, waiting on the money
- *   Paid              — settled
- *   Payment Reversed  — the money came back; owed again
+ *   Awaiting Payment  approved, and the treasury has not been told to pay
+ *   Paid              marked paid here, and the treasury has not been told yet
+ *   Downloaded        in a file — the treasury has the latest word on it
+ *   Payment Reversed  the money came back, or a payment was downloaded and
+ *                     can still be taken back if it was marked in error
  *
- * Awaiting and Downloaded are both "Unpaid" to the database; what separates
- * them is whether the bill has been into a file. Keeping them apart means the
- * awaiting list is work still to do, not a pile that grows forever.
+ * Two of these are work: Awaiting and Paid both have something the treasury
+ * has not heard. Downloading empties them, which is why they read as a queue
+ * rather than a pile — anything left is something still to send.
+ *
+ * Reversed carries two kinds of bill. One bounced. The other was paid and
+ * downloaded, and sits here so a payment marked by mistake can be undone
+ * rather than being lost behind a completed file. Both are answered the same
+ * way: Pay Again puts the bill back into Paid, owed a fresh file, so the
+ * treasury is told what is true now.
  */
 const TABS = [
-  { key: 'awaiting', label: 'Awaiting Payment', tone: 'amber', params: { paymentStatus: 'Unpaid', exportState: 'due' } },
-  { key: 'downloaded', label: 'Downloaded', tone: 'blue', params: { paymentStatus: 'Unpaid', exportState: 'sent' } },
-  { key: 'paid', label: 'Paid', tone: 'green', params: { paymentStatus: 'Paid' } },
-  { key: 'reversed', label: 'Payment Reversed', tone: 'red', params: { paymentStatus: 'Payment Reversed' } },
+  {
+    key: 'awaiting',
+    label: 'Awaiting Payment',
+    tone: 'amber',
+    // Money is owed on two kinds of bill: one never paid, and one whose
+    // payment bounced. Both wait here for the file that asks for payment.
+    params: { paymentStatus: 'Unpaid,Payment Reversed', exportState: 'due' },
+    download: {},
+  },
+  {
+    key: 'paid',
+    label: 'Paid',
+    tone: 'green',
+    params: { paymentStatus: 'Paid', exportState: 'due' },
+    // Downloading tells the treasury these were paid.
+    download: { paymentStatus: 'Paid' },
+  },
+  {
+    key: 'downloaded',
+    label: 'Downloaded',
+    tone: 'blue',
+    // Both ends of the desk once their file has gone out.
+    params: { paymentStatus: 'Unpaid,Paid', exportState: 'sent' },
+    download: { paymentStatus: 'Unpaid', includeExported: 'true' },
+  },
+  {
+    key: 'reversed',
+    label: 'Payment Reversed',
+    tone: 'red',
+    // Everything that can still be taken back: what bounced, and what was
+    // paid and has since gone out in a file.
+    params: { exportState: 'reversible' },
+    download: { paymentStatus: 'Payment Reversed' },
+  },
 ];
 
 export default function Payments() {
@@ -76,6 +113,13 @@ export default function Payments() {
    * moves a bill, not on every keystroke. Bundled with the list they turned
    * one search into four requests.
    */
+  /*
+   * The Reversed tab holds bills that bounced and bills that were paid and
+   * downloaded, so its count is not "how much came back". The banner needs
+   * the bounced ones alone, or it would raise an alarm about payments that
+   * went through perfectly well.
+   */
+  const [bounced, setBounced] = useState(0);
   const [countTick, setCountTick] = useState(0);
   useEffect(() => {
     Promise.all(
@@ -94,6 +138,12 @@ export default function Payments() {
           .catch(() => [t.key, 0])
       )
     ).then((rows) => setCounts(Object.fromEntries(rows)));
+
+    api.get('/claims', {
+      params: { status: 'Approved', paymentStatus: 'Payment Reversed', category: scheme || undefined, limit: 1 },
+    })
+      .then(({ data }) => setBounced(data.total))
+      .catch(() => setBounced(0));
   }, [countTick, scheme]);
 
   const setPayment = async (c, paymentStatus, remarks = '') => {
@@ -116,6 +166,10 @@ export default function Payments() {
 
   const total = (res?.claims || []).reduce((s, c) => s + c.amount, 0);
   const active = TABS.find((t) => t.key === tab);
+  /* Only the two queues hold bills back; the settled tabs are already spent. */
+  const guardedTab = tab === 'awaiting' || tab === 'paid';
+  /* Downloaded and Reversed each carry bills in more than one state. */
+  const mixed = tab === 'downloaded' || tab === 'reversed';
 
   return (
     <>
@@ -126,14 +180,14 @@ export default function Payments() {
         <button
           className="btn primary sm"
           onClick={() =>
-            /* The file follows the tab and the chosen scheme, and by default
-               leaves out bills that have already been downloaded. */
+            /* Each tab says what its file carries: the awaiting tab asks the
+               treasury to pay, the paid tab tells it a payment was made, and
+               the two settled tabs re-read what has already gone. */
             downloadFile('/reports/beneficiary.xlsx', {
-              paymentStatus: active.params.paymentStatus,
+              ...active.download,
               ...(scheme ? { category: scheme } : {}),
-              // The opt-in only means anything on the awaiting tab, which is
-              // the only one that holds bills back.
-              ...(redownload && tab === 'awaiting' ? { includeExported: 'true' } : {}),
+              // The opt-in only means anything where bills are held back.
+              ...(redownload && guardedTab ? { includeExported: 'true' } : {}),
             })
               .then((n) => setNote(
                 `Downloaded ${n} — ${scheme || 'all schemes'}, ${active.label.toLowerCase()}` +
@@ -167,9 +221,9 @@ export default function Payments() {
         ))}
       </div>
 
-      {counts.reversed > 0 && tab !== 'reversed' && (
+      {bounced > 0 && tab !== 'reversed' && (
         <Alert kind="warn">
-          <strong>{counts.reversed} bill(s)</strong> came back from the treasury and
+          <strong>{bounced} bill(s)</strong> came back from the treasury and
           still need paying.{' '}
           <button
             className="btn sm"
@@ -223,10 +277,12 @@ export default function Payments() {
         ) : res.claims.length === 0 ? (
           <Empty>
             {tab === 'reversed'
-              ? 'No reversed payments — everything that went out stayed out.'
+              ? 'Nothing has bounced, and no payment is waiting to be taken back.'
               : tab === 'downloaded'
                 ? 'Nothing has been downloaded yet. Bills move here once they go into a beneficiary file.'
-                : `No ${active.label.toLowerCase()} bills.`}
+                : tab === 'paid'
+                  ? 'No payment is waiting to be told to the treasury.'
+                  : 'Nothing is waiting to be paid.'}
           </Empty>
         ) : (
           <div className="table-wrap">
@@ -235,6 +291,8 @@ export default function Payments() {
                 <tr>
                   <th>Claim ID</th><th>School</th><th>Scheme</th><th>Account</th>
                   <th className="num">Amount</th>
+                  {/* Two tabs hold a mix, so each row says what it is. */}
+                  {mixed && <th>State</th>}
                   <th>{tab === 'reversed' ? 'Reversed On' : 'Approved'}</th>
                   {tab === 'reversed' && <th>Reason</th>}
                   <th>Exported</th><th></th>
@@ -264,6 +322,16 @@ export default function Payments() {
                         : <Badge tone="red">No bank details</Badge>}
                     </td>
                     <td className="num">{inr(c.amount)}</td>
+                    {mixed && (
+                      <td>
+                        <Badge tone={
+                          c.paymentStatus === 'Paid' ? 'green'
+                          : c.paymentStatus === 'Payment Reversed' ? 'red' : 'amber'
+                        }>
+                          {c.paymentStatus === 'Unpaid' ? 'Awaiting' : c.paymentStatus}
+                        </Badge>
+                      </td>
+                    )}
                     <td className="small">
                       {dateOf(tab === 'reversed' ? c.reversedAt : c.approvedAt)}
                     </td>
@@ -278,17 +346,18 @@ export default function Payments() {
                     {/* The buttons here act on the bill; they must not also
                         open it, so this cell keeps its clicks. */}
                     <td onClick={(e) => e.stopPropagation()}>
+                      {/* Two tabs hold a mix of bills, so what a row offers
+                          follows the bill's own state, not the tab it is read
+                          in. A bill not yet paid can be paid; a paid one can
+                          be reversed or undone; a reversed one paid again. */}
                       <div className="row">
-                        {/* A bill is marked paid from either end of the wait:
-                            before it goes into a file, or after the treasury
-                            has settled the file it went out in. */}
-                        {(tab === 'awaiting' || tab === 'downloaded') && (
+                        {c.paymentStatus === 'Unpaid' && (
                           <button className="btn green sm" disabled={busy === c._id}
                                   onClick={() => setPayment(c, 'Paid')}>
                             {busy === c._id ? '…' : 'Mark Paid'}
                           </button>
                         )}
-                        {tab === 'paid' && (
+                        {c.paymentStatus === 'Paid' && (
                           <>
                             <button className="btn red sm" disabled={busy === c._id}
                                     onClick={() => { setReversing(c); setReason(''); }}>
@@ -300,7 +369,7 @@ export default function Payments() {
                             </button>
                           </>
                         )}
-                        {tab === 'reversed' && (
+                        {c.paymentStatus === 'Payment Reversed' && (
                           <button className="btn green sm" disabled={busy === c._id}
                                   onClick={() => setPayment(c, 'Paid', 'Re-paid after reversal')}>
                             {busy === c._id ? '…' : 'Pay Again'}

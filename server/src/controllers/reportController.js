@@ -131,19 +131,21 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
   if (scheme) filter.category = scheme;
 
   /*
-   * One bill, one file — but only where a file means money moving.
+   * One bill, one file — and a file always carries what changed.
    *
-   * A bill awaiting payment goes out once: downloading it again would ask
-   * PFMS to pay the same vendor twice, with nothing in the second file to say
-   * it is a repeat. Paid and reversed bills are a different matter. Those
-   * tabs are a record of what happened, read as often as anyone needs, and
-   * the bills in them have already left the payment queue — so nothing is
-   * held back there.
+   * Two tabs hand work to the treasury: Awaiting Payment tells it to pay, and
+   * Paid tells it a payment was made. Both go out once. Downloading either
+   * twice would send the same instruction again, with nothing in the second
+   * file to say it is a repeat.
    *
-   * `includeExported=true` lifts the rule on the awaiting tab too, for a file
-   * lost before it reached the treasury.
+   * Reversed is not one of those. It is read to see what bounced, as often as
+   * anyone needs, and downloading it settles nothing — so it is never held
+   * back, and reading it never marks a bill as sent.
+   *
+   * `includeExported=true` lifts the rule for a file lost before it reached
+   * the treasury.
    */
-  const guarded = !tab || tab === PAYMENT_STATUS.UNPAID;
+  const guarded = tab !== PAYMENT_STATUS.REVERSED;
   const redownload = req.query.includeExported === 'true';
   if (guarded && !redownload) filter.exportDue = { $ne: false };
 
@@ -156,9 +158,9 @@ export const exportBeneficiary = asyncHandler(async (req, res) => {
     throw ApiError.badRequest(
       !guarded || redownload
         ? `No approved claims match this filter${where ? ` (${where})` : ''}, so there is nothing to export.`
-        : `Nothing new to export${where ? ` in ${where}` : ''}. Every bill awaiting payment here has already ` +
-          'been downloaded — they are in the Downloaded tab. A bill returns when it is edited, ' +
-          'or when its payment is undone or reversed.'
+        : `Nothing new to export${where ? ` in ${where}` : ''}. Everything here has already been ` +
+          'downloaded — it is in the Downloaded tab. A bill returns when it is edited, ' +
+          'when it is paid, or when its payment is undone or reversed.'
     );
   }
 
