@@ -108,15 +108,18 @@ export const getDashboard = asyncHandler(async (req, res) => {
               $cond: [{ $eq: ['$paymentStatus', PAYMENT_STATUS.PAID] }, '$amount', 0],
             },
           },
+          /*
+           * A reversal no longer parks the bill in a state of its own — it
+           * sends it back to Unpaid to be paid again — so counting that state
+           * would report nothing. `reversalCount` survives on the bill, so it
+           * still answers the question actually being asked: how many bills
+           * have had a payment come back.
+           */
           reversed: {
-            $sum: {
-              $cond: [{ $eq: ['$paymentStatus', PAYMENT_STATUS.REVERSED] }, 1, 0],
-            },
+            $sum: { $cond: [{ $gt: ['$reversalCount', 0] }, 1, 0] },
           },
           reversedAmount: {
-            $sum: {
-              $cond: [{ $eq: ['$paymentStatus', PAYMENT_STATUS.REVERSED] }, '$amount', 0],
-            },
+            $sum: { $cond: [{ $gt: ['$reversalCount', 0] }, '$amount', 0] },
           },
         },
       },
@@ -217,15 +220,22 @@ export const getDashboard = asyncHandler(async (req, res) => {
         value: h.amount,
         count: h.count,
       })),
+      /*
+       * Two slices, because every approved bill is one or the other. A bill
+       * that bounced is awaiting payment again, so it belongs in that slice;
+       * counting it as a third would put it in two at once and leave the pie
+       * adding to more than the whole. How many have ever bounced is carried
+       * alongside instead, as the fact it is rather than a share of the pie.
+       */
       payment: [
         { label: 'Paid', value: t.paid || 0, amount: t.paidAmount || 0 },
         {
           label: 'Awaiting payment',
-          value: approved - (t.paid || 0) - (t.reversed || 0),
-          amount: (t.approvedAmount || 0) - (t.paidAmount || 0) - (t.reversedAmount || 0),
+          value: approved - (t.paid || 0),
+          amount: (t.approvedAmount || 0) - (t.paidAmount || 0),
         },
-        { label: 'Payment Reversed', value: t.reversed || 0, amount: t.reversedAmount || 0 },
       ],
+      everReversed: { value: t.reversed || 0, amount: t.reversedAmount || 0 },
     };
 
     payload.byDistrict = await Claim.aggregate([

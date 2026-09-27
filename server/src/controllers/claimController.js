@@ -54,30 +54,9 @@ export const listClaims = asyncHandler(async (req, res) => {
    * Whether a bill is still waiting to go into a beneficiary file, or has
    * already been in one. The payments desk reads both: a bill that has gone
    * out is no longer work to do, whether or not the money has moved yet.
-   *
-   * `reversible` is the odd one, because its tab answers a question rather
-   * than describing a state: what can still be taken back? Two kinds of bill
-   * can — one that bounced, and one that was paid and whose file has gone,
-   * which is the last moment to undo a payment marked in error. They differ
-   * in export state, so they cannot share one, and building the pair on the
-   * client would let the two ends drift apart.
    */
   if (exportState === 'due') filter.exportDue = { $ne: false };
   if (exportState === 'sent') filter.exportDue = false;
-  if (exportState === 'reversible') {
-    // Under $and, because the search below claims $or for itself and the two
-    // must both hold: a search within this tab, not instead of it.
-    filter.$and = [
-      ...(filter.$and || []),
-      {
-        $or: [
-          { paymentStatus: PAYMENT_STATUS.REVERSED },
-          { paymentStatus: PAYMENT_STATUS.PAID, exportDue: false },
-        ],
-      },
-    ];
-    delete filter.paymentStatus;
-  }
 
   // A narrower scope always wins over a query parameter.
   if (school && !filter.school) filter.school = toObjectId(school);
@@ -829,18 +808,7 @@ export const setPaymentStatus = asyncHandler(async (req, res) => {
   const { paymentStatus, paymentRef = '', remarks = '' } = req.body;
   const from = claim.paymentStatus;
 
-  /*
-   * Saying "Paid" about a bill already paid is normally a slip worth catching.
-   * There is one case where it is the whole point: a paid bill whose file has
-   * gone out sits in Reversed so a payment marked by mistake can be taken
-   * back, and pressing Pay Again there means "this payment stands" — which
-   * returns it to Paid, owed a fresh file, so the treasury is told what is
-   * true now. Nothing about the payment changes; where it sits does.
-   */
-  const reaffirmingPayment =
-    from === paymentStatus && paymentStatus === PAYMENT_STATUS.PAID && claim.exportDue === false;
-
-  if (from === paymentStatus && !reaffirmingPayment) {
+  if (from === paymentStatus) {
     throw ApiError.badRequest(`This bill is already marked "${paymentStatus}".`);
   }
 
@@ -884,12 +852,18 @@ export const setPaymentStatus = asyncHandler(async (req, res) => {
     claim.reversalReason = remarks;
     claim.reversalCount += 1;
     claim.paidAt = null;
+    claim.paymentRef = '';
     /*
-     * The money came back, so the bill is owed a file again — and it leaves
-     * Downloaded in the same move. Without that it would sit there marked as
-     * already sent, and the one-file-per-bill rule would refuse to put it in
-     * the next file, which is exactly the file it now needs to be in.
+     * A reversal puts the bill back at the start: the money came back, so it
+     * is owed again and takes the same road as any unpaid bill — Awaiting,
+     * then a file, then Paid. Keeping it in a state of its own would leave it
+     * somewhere no step of that road looks, and give it a second way to be
+     * paid that has to be maintained beside the first.
+     *
+     * The count and the reason survive, so the history of failed attempts is
+     * still on the bill even though its state reads Unpaid.
      */
+    claim.paymentStatus = PAYMENT_STATUS.UNPAID;
     claim.exportDue = true;
   } else {
     // Back to Unpaid — the bill was never really settled, so it is owed again.
