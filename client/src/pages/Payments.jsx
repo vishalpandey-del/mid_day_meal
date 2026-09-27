@@ -80,6 +80,12 @@ export default function Payments() {
 
   // Reversal needs a written reason, so it goes through a confirm step.
   const [reversing, setReversing] = useState(null);
+  /*
+   * A treasury batch usually bounces whole, not a bill at a time, so the
+   * reversed tab lets several be ticked and reversed together — one reason
+   * recorded against each, which is what the audit trail needs anyway.
+   */
+  const [picked, setPicked] = useState(new Set());
   const [reason, setReason] = useState('');
 
   useEffect(() => {
@@ -121,6 +127,8 @@ export default function Payments() {
    */
   const [bounced, setBounced] = useState(0);
   const [countTick, setCountTick] = useState(0);
+  /* Anything that changes the list changes what is on screen, so the ticks go. */
+  useEffect(() => { setPicked(new Set()); }, [tab, scheme, query]);
   useEffect(() => {
     Promise.all(
       TABS.map((t) =>
@@ -164,12 +172,72 @@ export default function Payments() {
     }
   };
 
+  /* Reverse everything ticked, one call each, and say what refused. */
+  const reverseMany = async () => {
+    const rows = (res?.claims || []).filter((c) => picked.has(c._id) && c.paymentStatus === 'Paid');
+    if (!rows.length) return;
+
+    /*
+     * The reason is checked here, before a single call goes out. Left to the
+     * server it would refuse every bill in turn — fifty rejections for one
+     * missing sentence — and the dialog would close on the way, taking the
+     * box to write it in with it.
+     */
+    if (reason.trim().length < 5) {
+      setError('Say why these payments came back — at least 5 characters. It is recorded against each bill.');
+      return;
+    }
+
+    setBusy('bulk');
+    setError('');
+    const failed = [];
+    let done = 0;
+    for (const c of rows) {
+      try {
+        await api.patch(`/claims/${c._id}/payment`, { paymentStatus: 'Payment Reversed', remarks: reason });
+        done += 1;
+      } catch (e) {
+        failed.push(`${c.claimId}: ${errorText(e)}`);
+      }
+    }
+    setNote(`${done} payment(s) reversed.` + (failed.length ? ` ${failed.length} could not be.` : ''));
+    if (failed.length) setError(failed.slice(0, 3).join(' · '));
+    setBusy('');
+    // The dialog stays open if anything refused, so the reader sees which.
+    if (!failed.length) {
+      setReversing(null);
+      setReason('');
+    }
+    setPicked(new Set());
+    load();
+    setCountTick((n) => n + 1);
+  };
+
   const total = (res?.claims || []).reduce((s, c) => s + c.amount, 0);
   const active = TABS.find((t) => t.key === tab);
   /* Only the two queues hold bills back; the settled tabs are already spent. */
   const guardedTab = tab === 'awaiting' || tab === 'paid';
   /* Downloaded and Reversed each carry bills in more than one state. */
   const mixed = tab === 'downloaded' || tab === 'reversed';
+
+  /*
+   * Ticking is offered only where it means something: the reversed tab, and
+   * only on the paid rows there — a bill that has already bounced cannot
+   * bounce again. Selection is kept to what is on screen, so a reversal can
+   * never reach a row the reader cannot see.
+   */
+  const selectable = tab === 'reversed'
+    ? (res?.claims || []).filter((c) => c.paymentStatus === 'Paid')
+    : [];
+  const selectableIds = selectable.map((c) => c._id);
+  const pickedRows = selectable.filter((c) => picked.has(c._id));
+  const pickedTotal = pickedRows.reduce((sum, c) => sum + c.amount, 0);
+  const allPicked = selectable.length > 0 && selectableIds.every((id) => picked.has(id));
+  const toggle = (id) => setPicked((prev) => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   return (
     <>
@@ -271,7 +339,24 @@ export default function Payments() {
         ))}
       </div>
 
-      <Card title={`${active.label} · ${res?.total ?? '…'}`} padded={false}>
+      <Card
+        title={`${active.label} · ${res?.total ?? '…'}`}
+        padded={false}
+        actions={pickedRows.length > 0 ? (
+          <div className="row">
+            <span className="small muted">
+              {pickedRows.length} selected · {inr(pickedTotal)}
+            </span>
+            <button
+              className="btn red sm"
+              disabled={busy === 'bulk'}
+              onClick={() => { setReversing('bulk'); setReason(''); }}
+            >
+              {busy === 'bulk' ? 'Reversing…' : `Reverse ${pickedRows.length}`}
+            </button>
+          </div>
+        ) : null}
+      >
         {!res ? (
           <Spinner />
         ) : res.claims.length === 0 ? (
@@ -289,6 +374,15 @@ export default function Payments() {
             <table>
               <thead>
                 <tr>
+                  {selectable.length > 0 && (
+                    <th style={{ width: 34 }}>
+                      <input
+                        type="checkbox"
+                        checked={allPicked}
+                        onChange={() => setPicked(allPicked ? new Set() : new Set(selectableIds))}
+                      />
+                    </th>
+                  )}
                   <th>Claim ID</th><th>School</th><th>Scheme</th><th>Account</th>
                   <th className="num">Amount</th>
                   {/* Two tabs hold a mix, so each row says what it is. */}
@@ -301,6 +395,18 @@ export default function Payments() {
               <tbody>
                 {res.claims.map((c) => (
                   <tr key={c._id} {...openRow(`/claims/${c._id}`, `Open ${c.claimId}`)}>
+                    {selectable.length > 0 && (
+                      /* Ticking is selecting, not opening. */
+                      <td onClick={(e) => e.stopPropagation()}>
+                        {c.paymentStatus === 'Paid' && (
+                          <input
+                            type="checkbox"
+                            checked={picked.has(c._id)}
+                            onChange={() => toggle(c._id)}
+                          />
+                        )}
+                      </td>
+                    )}
                     <td>
                       <strong>{c.claimId}</strong>
                       {c.reversalCount > 0 && (
@@ -346,10 +452,12 @@ export default function Payments() {
                     {/* The buttons here act on the bill; they must not also
                         open it, so this cell keeps its clicks. */}
                     <td onClick={(e) => e.stopPropagation()}>
-                      {/* Two tabs hold a mix of bills, so what a row offers
-                          follows the bill's own state, not the tab it is read
-                          in. A bill not yet paid can be paid; a paid one can
-                          be reversed or undone; a reversed one paid again. */}
+                      {/* What a row offers follows the bill's own state — two
+                          tabs hold a mix — and the tab it is read in. The
+                          reversed tab exists to take a payment back, so a paid
+                          bill there is offered that and nothing else; Undo
+                          belongs on the Paid tab, where the payment is still
+                          being decided. */}
                       <div className="row">
                         {c.paymentStatus === 'Unpaid' && (
                           <button className="btn green sm" disabled={busy === c._id}
@@ -363,10 +471,12 @@ export default function Payments() {
                                     onClick={() => { setReversing(c); setReason(''); }}>
                               Mark Reversed
                             </button>
-                            <button className="btn sm" disabled={busy === c._id}
-                                    onClick={() => setPayment(c, 'Unpaid')}>
-                              Undo
-                            </button>
+                            {tab !== 'reversed' && (
+                              <button className="btn sm" disabled={busy === c._id}
+                                      onClick={() => setPayment(c, 'Unpaid')}>
+                                Undo
+                              </button>
+                            )}
                           </>
                         )}
                         {c.paymentStatus === 'Payment Reversed' && (
@@ -387,15 +497,30 @@ export default function Payments() {
 
       <Confirm
         open={Boolean(reversing)}
-        title={`Reverse payment for ${reversing?.claimId || ''}?`}
+        title={reversing === 'bulk'
+          ? `Reverse ${pickedRows.length} payment(s)?`
+          : `Reverse payment for ${reversing?.claimId || ''}?`}
         onCancel={() => setReversing(null)}
-        onConfirm={() => setPayment(reversing, 'Payment Reversed', reason)}
+        onConfirm={() => {
+          // One bill or fifty, the reason is asked for before anything is sent.
+          if (reason.trim().length < 5) {
+            setError('Say why the payment came back — at least 5 characters. It is recorded in the audit trail.');
+            return;
+          }
+          return reversing === 'bulk'
+            ? reverseMany()
+            : setPayment(reversing, 'Payment Reversed', reason);
+        }}
         confirmLabel="Mark Reversed"
-        busy={busy === reversing?._id}
+        busy={busy === 'bulk' || busy === reversing?._id}
       >
         <p className="small">
-          The bill moves to <strong>Payment Reversed</strong> and comes back into the
-          PFMS file, so it gets paid again. The school is notified.
+          {reversing === 'bulk'
+            ? <>These {pickedRows.length} bill(s), {inr(pickedTotal)} altogether, move to{' '}
+              <strong>Payment Reversed</strong> and come back into the PFMS file, so they get
+              paid again. The same reason is recorded against each, and every school is notified.</>
+            : <>The bill moves to <strong>Payment Reversed</strong> and comes back into the
+              PFMS file, so it gets paid again. The school is notified.</>}
         </p>
         <div className="field">
           <label>Why did the payment come back? *</label>
